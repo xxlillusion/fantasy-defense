@@ -4,7 +4,7 @@ import type { EventBus, GameEventName, GameEvents } from '../../src/core/events'
 import { ENEMIES, towerStats } from '../../src/data';
 import { damageEnemy } from '../../src/sim/damage';
 import { enemyMaxHp } from '../../src/sim/economy';
-import { currentSlow, spawnBurn } from '../../src/sim/effects';
+import { currentSlow, hitEnemy, spawnBurn } from '../../src/sim/effects';
 import { addTower, heldEnemy, makeSim, seconds, steps, TOWER_TILE } from './helpers';
 
 function record<K extends GameEventName>(events: EventBus, name: K): GameEvents[K][] {
@@ -47,15 +47,17 @@ describe('shield (Shield Orc)', () => {
     }
   });
 
-  it('a tower breaks it in 3 shots; absorbed hits carry no slow', () => {
+  it('a tower breaks it in 3 shots; absorbed hits still slow but do not apply vulnerable', () => {
     const { sim, log } = makeSim();
     addTower(sim, 'frost', TOWER_TILE, 4, 'b');
     const orc = heldEnemy(sim, 'shieldbearer', 4);
+    for (let i = 0; i < 400 && log.of('projectileHit').length < 1; i++) sim.step(1 / 60);
+    expect(orc.shield).toBe(2);
+    expect(currentSlow(orc)).toBeGreaterThan(0); // crowd control lands through the shield
     for (let i = 0; i < 400 && log.of('projectileHit').length < 3; i++) sim.step(1 / 60);
     expect(orc.shield).toBe(0);
     expect(orc.hp).toBe(orc.maxHp);
-    expect(currentSlow(orc)).toBe(0);
-    expect(orc.vulnerable).toBeNull();
+    expect(orc.vulnerable).toBeNull(); // the damage amplifier is part of the blocked attack
     for (let i = 0; i < 200 && log.of('projectileHit').length < 4; i++) sim.step(1 / 60);
     expect(orc.hp).toBeLessThan(orc.maxHp);
     expect(currentSlow(orc)).toBeGreaterThan(0);
@@ -249,5 +251,18 @@ describe('stealth (Wraith)', () => {
     expect(w.revealed).toBe(false);
     expect(log.of('projectileHit').length).toBeGreaterThanOrEqual(1);
     expect(w.hp).toBeLessThan(w.maxHp);
+  });
+});
+
+describe('shield vs crowd control', () => {
+  it('a stun (freeze) lands through the shield while the damage is absorbed', () => {
+    const { sim } = makeSim({ rng: () => 0 });
+    const orc = heldEnemy(sim, 'shieldbearer', 4);
+    orc.stunRemaining = 0;
+    hitEnemy(sim.ctx, orc, 50, { armorPierce: false, crit: false, source: { type: 'tower', towerId: 1 } }, { stun: { chance: 1, duration: 1 }, slow: { amount: 0.5, duration: 2 } });
+    expect(orc.shield).toBe(2);
+    expect(orc.hp).toBe(orc.maxHp);
+    expect(orc.stunRemaining).toBeGreaterThan(0);
+    expect(currentSlow(orc)).toBeCloseTo(0.5);
   });
 });

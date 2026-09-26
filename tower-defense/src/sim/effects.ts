@@ -66,15 +66,17 @@ export function applyOnHitEffects(ctx: SimContext, enemy: EnemyState, fx: OnHitF
 }
 
 /**
- * One tower hit: damage plus on-hit effects. A hit absorbed by a shield is absorbed entirely
- * (no damage and no slow / stun / vulnerable). Returns true if the enemy died.
+ * One tower hit: damage plus on-hit effects. A shield absorbs the attack (the damage and the
+ * damage-amplifying vulnerable debuff), but crowd control (slow, stun/freeze) still lands.
+ * Returns true if the enemy died.
  */
 export function hitEnemy(ctx: SimContext, enemy: EnemyState, baseDamage: number, opts: DamageOpts, fx: OnHitFx): boolean {
   if (!enemy.alive) return false;
   const absorbed = shieldAbsorbs(enemy, opts);
   const killed = damageEnemy(ctx, enemy, baseDamage, opts);
-  if (!absorbed && !killed) applyOnHitEffects(ctx, enemy, fx);
-  return killed;
+  if (killed) return true;
+  applyOnHitEffects(ctx, enemy, absorbed ? { slow: fx.slow, stun: fx.stun } : fx);
+  return false;
 }
 
 /** Count down slow, stun and vulnerable timers. */

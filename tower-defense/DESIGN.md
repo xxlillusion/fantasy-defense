@@ -338,7 +338,7 @@ New fields on `EnemyDef`:
 | Kind | Name | HP | Speed | Bounty | Trait |
 |---|---|---|---|---|---|
 | `shaman` | Goblin Shaman | 80 | 0.9 | 10 | Every 1s, heals other enemies within 2 tiles by 5% of their max HP |
-| `shieldbearer` | Shield Orc | 120 | 0.8 | 9 | Armor 1. A shield absorbs the next 3 hits entirely. Ground burn ignores the shield |
+| `shieldbearer` | Shield Orc | 120 | 0.8 | 9 | Armor 1. A shield absorbs the damage (and Shatter vulnerable) of the next 3 hits; crowd control (slow, stun/freeze) still lands. Ground burn ignores the shield |
 | `broodmother` | Broodmother | 180 | 0.7 | 6 | On death, spawns 4 imps (`swarmling`) at her path progress |
 | `wraith` | Wraith | 70 | 1.2 | 9 | Stealthed. Can only be targeted while revealed, by a Frost tower's range (any level), Sniper Seer's detection, or the hero's 2.5 tiles |
 | `dragon` | Elder Wyvern (boss) | 1600 | 0.55 | 175 | Flying boss. Armor 3, 50% slow resist, stun-immune, costs 5 lives |
