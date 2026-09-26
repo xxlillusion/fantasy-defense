@@ -1,7 +1,8 @@
-// Status effects (slow, stun) and persistent ground effects (burn).
+// Status effects (slow, stun, vulnerable) and persistent ground effects (burn).
+// Stream A1 owns this file.
 import type { Vec2 } from '../core/types';
 import type { TowerLevelStats } from '../data';
-import { damageEnemy } from './damage';
+import { damageEnemy, shieldAbsorbs, type DamageOpts } from './damage';
 import { enemiesInRange } from './targeting';
 import { allocId, EPS, type DamageSource, type EnemyState, type SimContext } from './state';
 
@@ -38,18 +39,45 @@ export function stunEnemy(ctx: SimContext, enemy: EnemyState, duration: number):
   return true;
 }
 
-/** On-hit status effects of a tower level (slow always; stun by chance). */
-export function applyOnHitEffects(
-  ctx: SimContext,
-  enemy: EnemyState,
-  fx: { slow?: TowerLevelStats['slow']; stun?: TowerLevelStats['stun'] },
-): void {
+/** Apply or refresh the vulnerable debuff: the larger amount and the longer time left win. */
+export function applyVulnerable(enemy: EnemyState, amount: number, duration: number): void {
+  if (!enemy.alive || amount <= 0 || duration <= 0) return;
+  const v = enemy.vulnerable;
+  if (v && v.remaining > EPS) {
+    v.amount = Math.max(v.amount, amount);
+    v.remaining = Math.max(v.remaining, duration);
+  } else {
+    enemy.vulnerable = { amount, remaining: duration };
+  }
+}
+
+export interface OnHitFx {
+  slow?: TowerLevelStats['slow'];
+  stun?: TowerLevelStats['stun'];
+  vulnerable?: TowerLevelStats['vulnerable'];
+}
+
+/** On-hit status effects of a tower level (slow and vulnerable always; stun by chance). */
+export function applyOnHitEffects(ctx: SimContext, enemy: EnemyState, fx: OnHitFx): void {
   if (!enemy.alive) return;
   if (fx.slow) applySlow(enemy, fx.slow.amount, fx.slow.duration);
+  if (fx.vulnerable) applyVulnerable(enemy, fx.vulnerable.amount, fx.vulnerable.duration);
   if (fx.stun && !enemy.def.stunImmune && ctx.rng() < fx.stun.chance) stunEnemy(ctx, enemy, fx.stun.duration);
 }
 
-/** Count down slow and stun timers. */
+/**
+ * One tower hit: damage plus on-hit effects. A hit absorbed by a shield is absorbed entirely
+ * (no damage and no slow / stun / vulnerable). Returns true if the enemy died.
+ */
+export function hitEnemy(ctx: SimContext, enemy: EnemyState, baseDamage: number, opts: DamageOpts, fx: OnHitFx): boolean {
+  if (!enemy.alive) return false;
+  const absorbed = shieldAbsorbs(enemy, opts);
+  const killed = damageEnemy(ctx, enemy, baseDamage, opts);
+  if (!absorbed && !killed) applyOnHitEffects(ctx, enemy, fx);
+  return killed;
+}
+
+/** Count down slow, stun and vulnerable timers. */
 export function tickStatuses(ctx: SimContext, dt: number): void {
   for (const e of ctx.state.enemies) {
     if (!e.alive) continue;
@@ -60,6 +88,10 @@ export function tickStatuses(ctx: SimContext, dt: number): void {
     if (e.stunRemaining > 0) {
       e.stunRemaining -= dt;
       if (e.stunRemaining <= EPS) e.stunRemaining = 0;
+    }
+    if (e.vulnerable) {
+      e.vulnerable.remaining -= dt;
+      if (e.vulnerable.remaining <= EPS) e.vulnerable = null;
     }
   }
 }
@@ -84,7 +116,8 @@ export function spawnBurn(
 
 /**
  * Burning ground: marks ground enemies inside as burning and deals dps in ticks of
- * BURN_TICK_INTERVAL (dps * duration total). Burn damage ignores armor.
+ * BURN_TICK_INTERVAL (dps * duration total). Burn damage ignores armor, bypasses shields and
+ * also hurts unrevealed stealth enemies.
  */
 export function updateGroundEffects(ctx: SimContext, dt: number): void {
   const { state } = ctx;
@@ -93,13 +126,13 @@ export function updateGroundEffects(ctx: SimContext, dt: number): void {
 
   for (const g of state.groundEffects) {
     if (g.kind !== 'burn') continue; // meteorWarning is ticked by abilities.ts (A2)
-    const inside = enemiesInRange(state.enemies, GROUND_ONLY, g.pos, g.radius);
+    const inside = enemiesInRange(state.enemies, GROUND_ONLY, g.pos, g.radius, true);
     for (const e of inside) e.burning = true;
     g.tickTimer += dt;
     if (g.tickTimer >= BURN_TICK_INTERVAL - EPS) {
       g.tickTimer -= BURN_TICK_INTERVAL;
       const amount = g.dps * BURN_TICK_INTERVAL;
-      for (const e of inside) damageEnemy(ctx, e, amount, { armorPierce: true, crit: false, source: g.source });
+      for (const e of inside) damageEnemy(ctx, e, amount, { armorPierce: true, crit: false, source: g.source, groundBurn: true });
     }
     g.remaining -= dt;
   }

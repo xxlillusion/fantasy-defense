@@ -79,13 +79,73 @@ const FRAG = /* glsl */ `
 #include <common>
 #include <fog_pars_fragment>
 uniform sampler2D map;
+uniform vec4 uFrame;
+uniform vec2 uSheet;
 uniform vec3 uTint;
 uniform vec3 uAdd;
+uniform float uAlpha;
+uniform float uWobble;
+uniform float uTime;
+uniform vec4 uOutline;
+uniform float uCrack;
+uniform float uSat;
 varying vec2 vUv;
+
+vec2 frameClamp(vec2 uv) {
+  vec2 lo = uFrame.xy + 0.5 / uSheet;
+  vec2 hi = uFrame.xy + uFrame.zw - 0.5 / uSheet;
+  return clamp(uv, lo, hi);
+}
+
+vec2 hash2(vec2 p) {
+  p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+  return fract(sin(p) * 43758.5453);
+}
+
+// Distance to the nearest Voronoi edge (pixel-aligned cracked-ice pattern).
+float crackEdge(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  float d1 = 8.0, d2 = 8.0;
+  for (int y = -1; y <= 1; y++)
+    for (int x = -1; x <= 1; x++) {
+      vec2 g = vec2(float(x), float(y));
+      vec2 o = hash2(i + g);
+      float d = length(g + o - f);
+      if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) { d2 = d; }
+    }
+  return d2 - d1;
+}
+
 void main() {
-  vec4 c = texture2D(map, vUv);
-  if (c.a < 0.5) discard;
-  gl_FragColor = vec4(c.rgb * uTint + uAdd, 1.0);
+  vec2 uv = vUv;
+  if (uWobble > 0.0) {
+    float ty = floor(uv.y * uSheet.y);
+    uv.x += floor(sin(ty * 0.7 + uTime * 11.0) * uWobble + 0.5) / uSheet.x;
+  }
+  uv = frameClamp(uv);
+  vec4 c = texture2D(map, uv);
+  if (c.a < 0.5) {
+    if (uOutline.a <= 0.0) discard;
+    vec2 d = 1.0 / uSheet;
+    float n = texture2D(map, frameClamp(uv + vec2(d.x, 0.0))).a
+            + texture2D(map, frameClamp(uv - vec2(d.x, 0.0))).a
+            + texture2D(map, frameClamp(uv + vec2(0.0, d.y))).a
+            + texture2D(map, frameClamp(uv - vec2(0.0, d.y))).a;
+    if (n < 0.5) discard;
+    gl_FragColor = vec4(uOutline.rgb, uOutline.a);
+  } else {
+    vec3 col = c.rgb;
+    if (uSat < 1.0) col = mix(vec3(dot(col, vec3(0.3, 0.59, 0.11))), col, uSat);
+    col = col * uTint + uAdd;
+    if (uCrack > 0.0) {
+      vec2 tp = floor((uv - uFrame.xy) * uSheet);
+      float e = crackEdge(tp / 5.0);
+      vec3 ice = col * vec3(0.72, 0.9, 1.15) + vec3(0.06, 0.12, 0.2);
+      col = mix(col, e < 0.16 ? vec3(0.85, 0.97, 1.0) : ice, uCrack);
+    }
+    gl_FragColor = vec4(col, uAlpha);
+  }
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
   #include <fog_fragment>
@@ -101,9 +161,16 @@ function getBaseMaterial(): THREE.ShaderMaterial {
         {
           map: { value: null },
           uFrame: { value: new THREE.Vector4(0, 0, 1, 1) },
+          uSheet: { value: new THREE.Vector2(1, 1) },
           uFlip: { value: 0 },
           uTint: { value: new THREE.Color(1, 1, 1) },
           uAdd: { value: new THREE.Color(0, 0, 0) },
+          uAlpha: { value: 1 },
+          uWobble: { value: 0 },
+          uTime: { value: 0 },
+          uOutline: { value: new THREE.Vector4(0, 0, 0, 0) },
+          uCrack: { value: 0 },
+          uSat: { value: 1 },
         },
       ]),
       vertexShader: VERT,
@@ -131,10 +198,15 @@ export class Billboard {
     this.mesh.frustumCulled = false;
   }
 
+  private u<T>(name: string): T {
+    return this.material.uniforms[name]!.value as T;
+  }
+
   setSheet(st: SheetTexture): void {
     if (this.sheet === st) return;
     this.sheet = st;
     this.material.uniforms.map!.value = st.texture;
+    this.u<THREE.Vector2>('uSheet').set(st.sheet.frameW * st.sheet.frames, st.sheet.frameH);
     this.frame = -1;
     this.setFrame(0, this.flip);
   }
@@ -142,9 +214,10 @@ export class Billboard {
   setFrame(index: number, flip: boolean): void {
     if (!this.sheet || (index === this.frame && flip === this.flip)) return;
     const n = this.sheet.sheet.frames;
+    index = Math.max(0, Math.min(n - 1, index));
     this.frame = index;
     this.flip = flip;
-    (this.material.uniforms.uFrame!.value as THREE.Vector4).set(index / n, 0, 1 / n, 1);
+    this.u<THREE.Vector4>('uFrame').set(index / n, 0, 1 / n, 1);
     this.material.uniforms.uFlip!.value = flip ? 1 : 0;
   }
 
@@ -168,11 +241,53 @@ export class Billboard {
   }
 
   setTint(r: number, g: number, b: number): void {
-    (this.material.uniforms.uTint!.value as THREE.Color).setRGB(r, g, b);
+    this.u<THREE.Color>('uTint').setRGB(r, g, b);
   }
 
   setAdd(r: number, g: number, b: number): void {
-    (this.material.uniforms.uAdd!.value as THREE.Color).setRGB(r, g, b);
+    this.u<THREE.Color>('uAdd').setRGB(r, g, b);
+  }
+
+  /** 0..1 opacity. Below 1 the sprite is blended (no depth write). */
+  setAlpha(a: number): void {
+    this.material.uniforms.uAlpha!.value = a;
+    this.alpha = a;
+    this.updateBlend();
+    this.mesh.visible = a > 0.005;
+  }
+
+  private alpha = 1;
+  private outlineA = 0;
+
+  private updateBlend(): void {
+    const blended = this.alpha < 0.999 || this.outlineA > 0;
+    if (this.material.transparent !== blended) this.material.transparent = blended;
+    this.material.depthWrite = this.alpha >= 0.999;
+    this.mesh.renderOrder = blended ? 6 : 0;
+  }
+
+  /** Heat-shimmer: per-row horizontal offset amplitude in texels (0 = off). */
+  setWobble(texels: number, time: number): void {
+    this.material.uniforms.uWobble!.value = texels;
+    this.material.uniforms.uTime!.value = time;
+  }
+
+  /** 1-texel silhouette outline (alpha 0 = off). */
+  setOutline(color: number, alpha: number): void {
+    const c = this.u<THREE.Vector4>('uOutline');
+    c.set(((color >> 16) & 255) / 255, ((color >> 8) & 255) / 255, (color & 255) / 255, alpha);
+    this.outlineA = alpha;
+    this.updateBlend();
+  }
+
+  /** Cracked-ice overlay strength 0..1 (vulnerable). */
+  setCrack(k: number): void {
+    this.material.uniforms.uCrack!.value = k;
+  }
+
+  /** Saturation 1 = normal, 0 = grayscale. */
+  setSaturation(s: number): void {
+    this.material.uniforms.uSat!.value = s;
   }
 
   dispose(): void {

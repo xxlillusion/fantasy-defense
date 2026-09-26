@@ -1,13 +1,17 @@
-// Stream C entry point: pixel-sprite billboards for towers/enemies + combat VFX.
+// Stream C entry point: pixel-sprite billboards for towers / enemies / hero / portal spirit /
+// title lineup, plus combat VFX.
 import * as THREE from 'three';
 import type { EventBus } from '../../core/events';
 import type { CreateEntities, IEntities, RendererHost } from '../../core/interfaces';
 import type { EntityId, GameSnapshot } from '../../core/types';
 import { createVfx, type Vfx } from '../vfx';
 import { computeBillboardFrame, disposeSheetTextures, type BillboardFrame } from './billboard';
-import { EnemyView } from './enemyViews';
+import { disposeEnemyStatusTextures, EnemyView } from './enemyViews';
 import { disposeGlow } from './glow';
+import { HeroView } from './heroView';
+import { LineupView } from './lineupView';
 import { disposeShadows } from './shadows';
+import { SpiritView } from './spiritView';
 import { TowerView } from './towerViews';
 
 const MAX_POOL = 128;
@@ -20,6 +24,9 @@ export const createEntities: CreateEntities = (): IEntities => {
   const enemies = new Map<EntityId, EnemyView>();
   const towerPool: TowerView[] = [];
   const enemyPool: EnemyView[] = [];
+  let hero: HeroView | null = null;
+  let spirit: SpiritView | null = null;
+  let lineup: LineupView | null = null;
   const frame: BillboardFrame = { yaw: 0, stretch: 1, camera: new THREE.PerspectiveCamera() };
   const bufSize = new THREE.Vector2();
   let lastTime = 0;
@@ -60,7 +67,7 @@ export const createEntities: CreateEntities = (): IEntities => {
         enemies.set(e.id, v);
         layer.add(v.root);
       }
-      v.update(e, s.time, dtReal, frame);
+      v.update(e, s.time, dtReal, frame, clock);
     }
     for (const [id, v] of enemies) {
       if (seen.has(id)) continue;
@@ -75,11 +82,28 @@ export const createEntities: CreateEntities = (): IEntities => {
     init(h: RendererHost, events: EventBus) {
       host = h;
       vfx = createVfx(h.layers.vfx, events);
+      hero = new HeroView();
+      spirit = new SpiritView();
+      lineup = new LineupView();
+      h.layers.entities.add(hero.root, hero.flagRoot, spirit.root, lineup.root);
       unsubs.push(
         events.on('enemyDamaged', (e) => enemies.get(e.enemyId)?.flash()),
+        events.on('shieldBlocked', (e) => enemies.get(e.enemyId)?.shieldFlash()),
         events.on('towerFired', (e) => {
           const v = towers.get(e.towerId);
           if (v) v.firedAt = lastTime;
+        }),
+        events.on('heroAttacked', () => {
+          if (hero) hero.attackAt = lastTime;
+        }),
+        events.on('heroDamaged', () => hero?.hurt()),
+        events.on('heroRespawned', () => hero?.respawn()),
+        events.on('heroSpawned', () => hero?.respawn()),
+        events.on('enemyLeaked', () => spirit?.flinch()),
+        events.on('waveCleared', () => spirit?.cheer()),
+        events.on('gameStarted', () => {
+          spirit?.reset();
+          hero?.reset();
         }),
       );
     },
@@ -99,6 +123,9 @@ export const createEntities: CreateEntities = (): IEntities => {
 
       syncTowers(s);
       syncEnemies(s, dtReal);
+      hero?.update(s.hero, s.phase, s.time, dtReal, clock, frame);
+      spirit?.update(s, dtReal, clock, frame);
+      lineup?.update(s, clock, frame);
       vfx.update(s, dGame, dtReal, frame, pixelScale);
     },
 
@@ -121,9 +148,19 @@ export const createEntities: CreateEntities = (): IEntities => {
       enemies.clear();
       towerPool.length = 0;
       enemyPool.length = 0;
+      if (hero) host?.layers.entities.remove(hero.root, hero.flagRoot);
+      if (spirit) host?.layers.entities.remove(spirit.root);
+      if (lineup) host?.layers.entities.remove(lineup.root);
+      hero?.dispose();
+      spirit?.dispose();
+      lineup?.dispose();
+      hero = null;
+      spirit = null;
+      lineup = null;
       disposeSheetTextures();
       disposeShadows();
       disposeGlow();
+      disposeEnemyStatusTextures();
       host = null;
     },
   };

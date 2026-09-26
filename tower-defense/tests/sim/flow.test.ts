@@ -14,6 +14,13 @@ function runUntil(sim: SimulationHandle, pred: () => boolean, maxSteps = 200_000
 
 const phase = (sim: SimulationHandle): GamePhase => sim.snapshot().phase;
 
+/** v1-style leak tests: without the hero guarding the portal, everything walks in. */
+function noHero(sim: SimulationHandle): SimulationHandle {
+  sim.state.hero = null;
+  sim.invalidate();
+  return sim;
+}
+
 describe('phases and waves', () => {
   it('title: step does nothing and nothing can be built', () => {
     const { sim } = makeSim({ start: false });
@@ -37,13 +44,19 @@ describe('phases and waves', () => {
 
   it('wave clear bonus, countdown, early send bonus and auto-send', () => {
     const { sim, log } = makeSim({ difficulty: 'easy' });
+    noHero(sim);
     sim.sendWave();
     runUntil(sim, () => log.of('waveCleared').length > 0);
     expect(log.of('enemyLeaked')).toHaveLength(WAVES[0]![0]!.count);
     expect(log.of('waveCleared')).toMatchObject([{ wave: 1, bonus: waveClearBonus(1) }]);
     expect(waveClearBonus(1)).toBe(RULES.waveClearBonusBase + RULES.waveClearBonusPerWave);
     expect(sim.snapshot()).toMatchObject({ phase: 'build', wave: 1, buildCountdown: RULES.buildCountdown });
-    expect(sim.snapshot().gold).toBe(DIFFICULTIES.easy.startGold + waveClearBonus(1));
+    const beforeInterest = DIFFICULTIES.easy.startGold + waveClearBonus(1);
+    const interest = Math.min(Math.floor(beforeInterest * RULES.interestRate), RULES.interestCap);
+    expect(interest).toBeGreaterThan(0);
+    expect(log.of('waveCleared')[0]!.interest).toBe(interest);
+    expect(sim.snapshot().gold).toBe(beforeInterest + interest);
+    expect(sim.snapshot().lastInterest).toBe(interest);
 
     steps(sim, seconds(5.5));
     const s = sim.snapshot();
@@ -68,6 +81,7 @@ describe('phases and waves', () => {
 
   it('leaks cost lives and reaching 0 lives is a defeat (gameOver once)', () => {
     const { sim, log } = makeSim({ difficulty: 'hard' });
+    noHero(sim);
     sim.sendWave();
     runUntil(sim, () => phase(sim) !== 'wave');
     expect(sim.snapshot().lives).toBe(DIFFICULTIES.hard.lives - WAVES[0]![0]!.count);
@@ -87,6 +101,7 @@ describe('phases and waves', () => {
 
   it('boss leak costs its livesCost', () => {
     const { sim, log } = makeSim();
+    noHero(sim);
     sim.debugSpawn('boss', sim.state.pathLengths[0]! - 0.001);
     sim.step(SIM_DT);
     expect(log.of('enemyLeaked')[0]).toMatchObject({ kind: 'boss', livesLost: 5 });

@@ -2,6 +2,47 @@
 
 /** Encode mono float samples (-1..1) as a 16-bit PCM WAV file. */
 export function encodeWav(samples: Float32Array, sampleRate: number): ArrayBuffer {
+  const job = createWavJob(samples, sampleRate);
+  job.step(Infinity);
+  return job.result!;
+}
+
+/** Time-sliced WAV encoder for long buffers (music stems): call step(budgetMs) until it returns true. */
+export function createWavJob(samples: Float32Array, sampleRate: number): { step(budgetMs: number): boolean; readonly result: ArrayBuffer | null } {
+  const { buf, v } = wavHeader(samples.length, sampleRate);
+  const CHUNK = 16384;
+  let i = 0;
+  let done = false;
+  const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+  return {
+    get result() {
+      return done ? buf : null;
+    },
+    step(budgetMs) {
+      const start = now();
+      while (i < samples.length) {
+        const end = Math.min(samples.length, i + CHUNK);
+        writePcm16(v, samples, i, end);
+        i = end;
+        if (now() - start > budgetMs) return false;
+      }
+      done = true;
+      return true;
+    },
+  };
+}
+
+function writePcm16(v: DataView, samples: Float32Array, from: number, to: number): void {
+  let off = 44 + from * 2;
+  for (let i = from; i < to; i++, off += 2) {
+    const x = samples[i];
+    const c = x !== x ? 0 : x > 1 ? 1 : x < -1 ? -1 : x; // NaN-safe clamp
+    v.setInt16(off, c < 0 ? Math.round(c * 0x8000) : Math.round(c * 0x7fff), true);
+  }
+}
+
+function wavHeader(length: number, sampleRate: number): { buf: ArrayBuffer; v: DataView } {
+  const samples = { length };
   const bytesPerSample = 2;
   const dataSize = samples.length * bytesPerSample;
   const buf = new ArrayBuffer(44 + dataSize);
@@ -22,13 +63,7 @@ export function encodeWav(samples: Float32Array, sampleRate: number): ArrayBuffe
   v.setUint16(34, 16, true); // bits per sample
   str(36, 'data');
   v.setUint32(40, dataSize, true);
-  let off = 44;
-  for (let i = 0; i < samples.length; i++, off += 2) {
-    const x = samples[i];
-    const c = x !== x ? 0 : x > 1 ? 1 : x < -1 ? -1 : x; // NaN-safe clamp
-    v.setInt16(off, c < 0 ? Math.round(c * 0x8000) : Math.round(c * 0x7fff), true);
-  }
-  return buf;
+  return { buf, v };
 }
 
 /** Wrap WAV bytes in an object URL (falls back to a data URL). Browser only. */

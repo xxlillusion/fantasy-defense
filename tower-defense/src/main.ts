@@ -45,9 +45,27 @@ const ctx: UiContext = {
 };
 ui.init(ctx);
 
-// Persist results.
-events.on('gameOver', ({ result, stars }) => {
-  if (result === 'victory') save.recordResult(snapshot.mapId, snapshot.difficulty, stars);
+// Persist results (per map / difficulty / mode). Read the options from the live sim state, because
+// the frame snapshot may lag one step behind the event.
+events.on('gameOver', ({ result, stars, score, wave }) => {
+  const s = sim.snapshot();
+  save.recordRun(s.mapId, s.difficulty, s.mode, { stars: result === 'victory' ? stars : 0, score, wave });
+});
+
+// Settings that non-UI modules read (e.g. the environment's screen shake). Kept in sync on save.
+const settingsHost = window as unknown as { __tdSettings: ReturnType<typeof save.getSettings> };
+settingsHost.__tdSettings = save.getSettings();
+const saveSettings = save.saveSettings.bind(save);
+save.saveSettings = (s) => {
+  saveSettings(s);
+  settingsHost.__tdSettings = save.getSettings();
+};
+
+// Hit-stop: a brief slow-motion beat when a boss dies (real-time, independent of game speed).
+const HIT_STOP = { scale: 0.3, duration: 0.35 };
+let hitStop = 0;
+events.on('enemyKilled', ({ kind }) => {
+  if (kind === 'boss' || kind === 'dragon') hitStop = HIT_STOP.duration;
 });
 
 // Fixed-timestep loop: sim at SIM_DT, speed multiplier = more steps per real second.
@@ -60,7 +78,9 @@ function frame(now: number) {
   last = now;
   snapshot = sim.snapshot();
   if (!snapshot.paused && (snapshot.phase === 'build' || snapshot.phase === 'wave')) {
-    acc += dtReal * snapshot.speed;
+    const timeScale = hitStop > 0 ? HIT_STOP.scale : 1;
+    hitStop = Math.max(0, hitStop - dtReal);
+    acc += dtReal * snapshot.speed * timeScale;
     let steps = 0;
     while (acc >= SIM_DT && steps < MAX_STEPS_PER_FRAME) {
       sim.step(SIM_DT);

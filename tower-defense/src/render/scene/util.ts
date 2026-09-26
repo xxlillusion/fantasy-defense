@@ -44,7 +44,8 @@ export function disposeTree(root: THREE.Object3D): void {
   const geometries = new Set<THREE.BufferGeometry>();
   root.traverse((o) => {
     const m = o as THREE.Mesh;
-    if (m.geometry) geometries.add(m.geometry);
+    // three's Sprite geometry is a shared module singleton: leave it alone
+    if (m.geometry && !(o as THREE.Sprite).isSprite) geometries.add(m.geometry);
     const mat = m.material as THREE.Material | THREE.Material[] | undefined;
     if (mat) for (const x of Array.isArray(mat) ? mat : [mat]) materials.add(x);
   });
@@ -56,4 +57,52 @@ export function disposeTree(root: THREE.Object3D): void {
   }
   for (const g of geometries) g.dispose();
   for (const t of textures) t.dispose();
+}
+
+/** Tube along a curve whose radius tapers from r0 to r1. */
+export function taperedTube(points: THREE.Vector3[], r0: number, r1: number, tubular = 24, radial = 6, flatten = 1): THREE.BufferGeometry {
+  const curve = new THREE.CatmullRomCurve3(points);
+  const geo = new THREE.TubeGeometry(curve, tubular, 1, radial, false);
+  const pos = geo.attributes.position!;
+  const frames = curve.computeFrenetFrames(tubular, false);
+  const v = new THREE.Vector3();
+  const c = new THREE.Vector3();
+  for (let i = 0; i <= tubular; i++) {
+    curve.getPointAt(i / tubular, c);
+    const r = r0 + (r1 - r0) * (i / tubular);
+    for (let j = 0; j <= radial; j++) {
+      const k = i * (radial + 1) + j;
+      v.fromBufferAttribute(pos, k).sub(c);
+      // flatten along the binormal to make blade-like crests
+      const b = frames.binormals[i]!;
+      const along = v.dot(b);
+      v.addScaledVector(b, along * (flatten - 1));
+      v.multiplyScalar(r);
+      pos.setXYZ(k, c.x + v.x, c.y + v.y, c.z + v.z);
+    }
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/** A built piece of the world with optional per-frame animation. */
+export interface WorldPart {
+  readonly object: THREE.Object3D;
+  /** time = ambient seconds, dt = real seconds since last frame. */
+  update?(time: number, dt: number): void;
+  /** For screen-size-scaled points (drawing-buffer height in px, vertical fov in degrees). */
+  setViewport?(heightPx: number, fovDeg: number): void;
+}
+
+/** Point-size scale for `gl_PointSize = size * uScale / -mv.z`. */
+export function pointScale(heightPx: number, fovDeg: number): number {
+  return heightPx / (2 * Math.tan(THREE.MathUtils.degToRad(fovDeg / 2)));
+}
+
+/** Dispose lights' shadow maps (disposeTree only handles meshes/materials/textures). */
+export function disposeLights(root: THREE.Object3D): void {
+  root.traverse((o) => {
+    const l = o as THREE.Light;
+    if (l.isLight) l.dispose();
+  });
 }

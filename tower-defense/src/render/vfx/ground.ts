@@ -30,6 +30,7 @@ export class GroundLayer {
   update(effects: readonly GroundEffectSnapshot[], dGame: number): void {
     const seen = new Set<EntityId>();
     for (const g of effects) {
+      if (g.kind !== 'burn') continue; // meteorWarning circles are drawn by the environment
       seen.add(g.id);
       let p = this.patches.get(g.id);
       if (!p) {

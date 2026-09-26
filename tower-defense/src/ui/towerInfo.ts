@@ -31,5 +31,9 @@ export function statRows(kind: TowerKind, level: TowerLevel, branch: TowerBranch
   if (s.burn) rows.push({ label: 'Burn', value: `${num(s.burn.dps)}/s ${num(s.burn.duration)}s` });
   if (s.stun) rows.push({ label: 'Stun', value: `${pct(s.stun.chance)} ${num(s.stun.duration)}s` });
   if (s.aura) rows.push({ label: 'Aura', value: 'All in range' });
+  if (s.pierce) rows.push({ label: 'Pierce', value: `${s.pierce} foes` });
+  if (s.vulnerable) rows.push({ label: 'Brittle', value: `+${pct(s.vulnerable.amount)} ${num(s.vulnerable.duration)}s` });
+  if (s.execute) rows.push({ label: 'Execute', value: `<${pct(s.execute)} HP` });
+  if (s.detection) rows.push({ label: 'Reveal', value: `${num(s.detection)} r` });
   return rows;
 }

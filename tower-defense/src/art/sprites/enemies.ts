@@ -4,7 +4,7 @@
 
 import type { EnemyKind } from '../../core/types';
 import { C, mix, ramp } from './palette';
-import { bar, cel, makeSheet, PixelCanvas, spike, type SpriteSheet } from './pixelCanvas';
+import { bar, cel, ditherEllipse, makeSheet, PixelCanvas, spike, type SpriteSheet } from './pixelCanvas';
 
 export const ENEMY_FRAME_SIZE: Record<EnemyKind, { w: number; h: number }> = {
   grunt: { w: 24, h: 26 },
@@ -13,13 +13,20 @@ export const ENEMY_FRAME_SIZE: Record<EnemyKind, { w: number; h: number }> = {
   swarmling: { w: 18, h: 18 },
   flyer: { w: 32, h: 26 },
   boss: { w: 50, h: 50 },
-  // v2 placeholders (Stream C replaces): reuse existing art until the new sprites exist.
-  shaman: { w: 24, h: 26 },
-  shieldbearer: { w: 34, h: 36 },
-  broodmother: { w: 34, h: 36 },
-  wraith: { w: 34, h: 30 },
-  dragon: { w: 32, h: 26 },
+  shaman: { w: 26, h: 30 },
+  shieldbearer: { w: 32, h: 32 },
+  broodmother: { w: 36, h: 30 },
+  wraith: { w: 26, h: 32 },
+  dragon: { w: 64, h: 52 },
 };
+
+// v2 enemy colors
+const ORC = 0x7aa050;
+const BROOD = 0xa04a9a;
+const WRAITH = 0x3a2a6a;
+const DRAGON = 0xc8282e;
+const DRAGON_GOLD = 0xffb830;
+
 
 /** Dominant colors, used for death puffs. */
 export const ENEMY_COLORS: Record<EnemyKind, readonly number[]> = {
@@ -29,11 +36,11 @@ export const ENEMY_COLORS: Record<EnemyKind, readonly number[]> = {
   swarmling: [C.imp, 0x8a2a8a, C.gold],
   flyer: [C.wyvern, C.belly, 0xd070ff],
   boss: [C.golem, C.rune, C.moss],
-  shaman: [C.goblin, C.leather, C.capRed],
-  shieldbearer: [C.troll, C.armor, C.trim],
-  broodmother: [C.troll, C.armor, C.trim],
-  wraith: [C.wolf, C.goblin, C.capRed],
-  dragon: [C.wyvern, C.belly, 0xd070ff],
+  shaman: [C.goblin, 0x4a6a3a, 0x7aff6a],
+  shieldbearer: [0x7aa050, 0x8a92a8, C.trim],
+  broodmother: [0xa04a9a, 0x4a2a5a, 0xff80e0],
+  wraith: [0x3a2a6a, 0xb8a8ff, 0x9ff0ff],
+  dragon: [0xc8282e, 0xffb830, 0x8a1a2a],
 };
 
 type Frame = 0 | 1;
@@ -311,6 +318,285 @@ function golem(f: Frame): PixelCanvas {
   return out.blit(back).blit(legs).blit(body).blit(head).blit(arm);
 }
 
+
+// ---------------------------------------------------------------- v2 enemies
+
+function shaman(f: Frame): PixelCanvas {
+  const { w, h } = ENEMY_FRAME_SIZE.shaman;
+  const out = new PixelCanvas(w, h);
+  const cx = 11, fy = h - 1;
+  const g = ramp(C.goblin), robe = ramp(0x4a6a3a), bone = ramp(0xf0e8d0), glow = ramp(0x7aff6a);
+  const wood = ramp(0x8a5a30);
+  const bob = f;
+  // totem strapped to the back, with glowing green eyes
+  const totem = new PixelCanvas(w, h);
+  const tx = cx - 8, ty = fy - 21 + bob;
+  totem.rect(tx, ty, 4, 12, cel(wood));
+  totem.line(tx, ty + 4, tx + 3, ty + 4, wood.d);
+  totem.line(tx, ty + 8, tx + 3, ty + 8, wood.d);
+  spike(totem, tx + 1, ty, -120, 4, 2, ramp(0x40a0ff).l);
+  spike(totem, tx + 3, ty, -70, 4, 2, ramp(C.capRed).l);
+  totem.outline();
+  totem.set(tx + 1, ty + 2, glow.h);
+  totem.set(tx + 2, ty + 2, glow.h);
+  totem.set(tx + 1, ty + 6, glow.l);
+  totem.set(tx + 2, ty + 6, glow.l);
+  const legs = new PixelCanvas(w, h);
+  const s = f === 0 ? 1 : -1;
+  legs.rect(cx - 3 - s, fy - 4, 2, 4, cel(g));
+  legs.rect(cx + 1 + s, fy - 4, 2, 4, cel(g));
+  legs.rect(cx - 3 - s, fy - 1, 3, 1, g.d);
+  legs.rect(cx + 1 + s, fy - 1, 3, 1, g.d);
+  legs.outline();
+  const body = new PixelCanvas(w, h);
+  body.poly([[cx - 4, fy - 11 + bob], [cx + 5, fy - 11 + bob], [cx + 6, fy - 3], [cx - 5, fy - 3]], cel(robe, { hi: 0.8 }));
+  for (let x = cx - 4; x <= cx + 5; x += 2) body.paintOver(x, fy - 4, robe.d);
+  for (let x = cx - 3; x <= cx + 4; x += 2) body.paintOver(x, fy - 10 + bob, bone.l);
+  body.outline();
+  const head = new PixelCanvas(w, h);
+  const hy = fy - 16 + bob;
+  spike(head, cx - 4, hy, 195, 6, 3, cel(g));
+  spike(head, cx + 6, hy - 1, -20, 5, 3, cel(g));
+  head.ellipse(cx + 1, hy, 6, 5.5, cel(g, { hi: 0.8 }));
+  // skull headdress with feathers
+  head.ellipse(cx + 0.5, hy - 4, 4, 2.8, cel(bone, { hi: 0.6 }), (_x, y) => y < hy - 2);
+  head.set(cx - 1, hy - 4, 0x302020);
+  head.set(cx + 2, hy - 4, 0x302020);
+  spike(head, cx - 2, hy - 6, -120, 5, 2, ramp(0x40a0ff).m);
+  spike(head, cx + 1, hy - 7, -95, 5, 2, ramp(C.capRed).m);
+  eye(head, cx + 1, hy, 0x7aff6a);
+  eye(head, cx + 4, hy, 0x7aff6a);
+  head.line(cx + 2, hy + 3, cx + 5, hy + 3, g.o);
+  head.set(cx + 2, hy + 1, 0x5aa0ff); // war paint
+  head.outline();
+  // skull staff
+  const staff = new PixelCanvas(w, h);
+  const sx = cx + 8, top = fy - 25 + bob;
+  bar(staff, cx + 6, fy - 1, sx, top + 2, 2, (_a, b) => (b < 0 ? wood.l : wood.d));
+  staff.ellipse(sx + 0.5, top, 3, 2.6, cel(bone, { hi: 0.6 }));
+  staff.rect(sx - 1, top + 2, 3, 1, bone.d);
+  staff.outline();
+  staff.set(sx - 1, top, glow.h);
+  staff.set(sx + 1, top, glow.h);
+  staff.set(sx, top + 1, 0x302020);
+  const arm = new PixelCanvas(w, h);
+  arm.rect(cx + 4, fy - 9 + bob, 3, 2, g.m);
+  arm.outline();
+  out.blit(totem).blit(legs).blit(body).blit(head).blit(staff).blit(arm);
+  const motes = f === 0 ? [[-3, -2], [3, -3], [0, -5]] : [[-3, -4], [3, -1], [1, -6]];
+  for (const [dx, dy] of motes) out.set(sx + dx!, top + dy!, glow.l);
+  return out;
+}
+
+function shieldOrc(f: Frame, shield: boolean): PixelCanvas {
+  const { w, h } = ENEMY_FRAME_SIZE.shieldbearer;
+  const out = new PixelCanvas(w, h);
+  const cx = 13, fy = h - 1;
+  const sk = ramp(ORC), le = ramp(C.leather), ir = ramp(0x8a92a8), tr = ramp(C.trim), gd = ramp(C.gold);
+  const bob = f;
+  const s = f === 0 ? 2 : -2;
+  const legs = new PixelCanvas(w, h);
+  legs.rect(cx - 5 - s, fy - 6, 4, 5, cel(le));
+  legs.rect(cx + 2 + s, fy - 6, 4, 5, cel(le));
+  legs.rect(cx - 6 - s, fy - 2, 5, 2, cel(ir));
+  legs.rect(cx + 2 + s, fy - 2, 5, 2, cel(ir));
+  legs.outline();
+  const back = new PixelCanvas(w, h);
+  back.ellipse(cx - 7, fy - 14 + bob, 3, 5, cel(sk));
+  if (!shield) {
+    // axe raised in the back hand
+    const wood = ramp(0x8a5a30);
+    bar(back, cx - 7, fy - 11 + bob, cx - 4, fy - 27 + bob, 2, (_a, b) => (b < 0 ? wood.l : wood.d));
+    back.poly([[cx - 5, fy - 29 + bob], [cx - 11, fy - 31 + bob], [cx - 11, fy - 23 + bob], [cx - 5, fy - 24 + bob]], cel(ir, { hi: 0.7 }));
+  }
+  back.outline();
+  const body = new PixelCanvas(w, h);
+  body.ellipse(cx, fy - 12 + bob, 8, 7, cel(sk, { hi: 0.85 }));
+  body.poly([[cx - 5, fy - 17 + bob], [cx + 6, fy - 17 + bob], [cx + 6, fy - 7 + bob], [cx - 5, fy - 7 + bob]], cel(le, { hi: 0.7 }));
+  body.line(cx - 5, fy - 17 + bob, cx + 5, fy - 8 + bob, le.d);
+  for (let x = cx - 5; x <= cx + 6; x++) body.paintOver(x, fy - 7 + bob, ir.m);
+  body.ellipse(cx - 5, fy - 17 + bob, 3.5, 2.5, cel(ir, { hi: 0.6 }));
+  body.ellipse(cx + 6, fy - 17 + bob, 3.5, 2.5, cel(ir, { hi: 0.6 }));
+  body.outline();
+  const head = new PixelCanvas(w, h);
+  const hx = cx + 3, hy = fy - 21 + bob;
+  head.ellipse(hx, hy, 5, 4.5, cel(sk));
+  head.ellipse(hx - 0.5, hy - 2, 5.5, 3, cel(ir, { hi: 0.6 }), (_x, y) => y < hy - 0.5);
+  head.rect(hx + 1, hy - 1, 1, 3, ir.d); // nose guard
+  head.set(hx + 3, hy + 1, 0xff3030);
+  head.set(hx - 1, hy + 1, 0xff3030);
+  head.set(hx + 2, hy + 3, 0xfff0d0);
+  head.set(hx + 4, hy + 2, 0xfff0d0);
+  head.line(hx + 1, hy + 3, hx + 4, hy + 3, sk.o);
+  head.outline();
+  const front = new PixelCanvas(w, h);
+  if (shield) {
+    // big tower shield carried in front
+    const sx = cx + 5, sy = fy - 25 + bob;
+    front.poly([[sx, sy + 1], [sx + 11, sy], [sx + 11, sy + 20], [sx + 5.5, sy + 23], [sx, sy + 20]], (u, v) => (u < -0.6 ? ir.l : u < 0.5 ? (v < -0.7 ? ir.h : ir.m) : ir.d));
+    for (let y = sy + 1; y < sy + 21; y++) {
+      front.paintOver(sx, y, ir.l);
+      front.paintOver(sx + 1, y, gd.m);
+      front.paintOver(sx + 10, y, gd.d);
+    }
+    front.ellipse(sx + 5.5, sy + 10, 3, 3.2, cel(tr, { hi: 0.6 }));
+    front.set(sx + 5, sy + 9, 0xfff0d0);
+    for (const [x, y] of [[2, 3], [9, 3], [2, 17], [9, 17]] as const) front.set(sx + x, sy + y, gd.h);
+  } else {
+    // shield broken: bare fist + a dangling strap
+    front.rect(cx + 7, fy - 12 + bob, 3, 3, sk.m);
+    front.line(cx + 8, fy - 9 + bob, cx + 10, fy - 5 + bob, le.m);
+    front.rect(cx + 9, fy - 5 + bob, 3, 2, ir.d);
+  }
+  front.outline();
+  return out.blit(back).blit(legs).blit(body).blit(head).blit(front);
+}
+
+function broodmother(f: Frame): PixelCanvas {
+  const { w, h } = ENEMY_FRAME_SIZE.broodmother;
+  const out = new PixelCanvas(w, h);
+  const cx = 17, fy = h - 1;
+  const sac = ramp(BROOD), chit = ramp(0x4a2a5a), imp = ramp(C.imp), egg = ramp(0xff80e0);
+  const bob = f;
+  const legsFar = new PixelCanvas(w, h);
+  const legsNear = new PixelCanvas(w, h);
+  // splayed spider legs: hip -> high knee -> foot planted outward
+  for (let i = 0; i < 4; i++) {
+    const spread = i - 1.5;
+    const hx = cx - 7 + i * 5;
+    for (const [layer, far] of [[legsFar, true], [legsNear, false]] as const) {
+      const up = (i + f + (far ? 1 : 0)) % 2 === 0 ? 0 : 2;
+      const o = far ? -2 : 0;
+      const kx = hx + spread * 4 + o, ky = fy - 17 + bob - up + (far ? 1 : 0);
+      const fx = hx + spread * 8 + o, fyy = fy - up;
+      layer.line(hx, fy - 10 + bob, kx, ky, far ? chit.d : chit.m, 2);
+      layer.line(kx, ky, fx, fyy, far ? chit.d : chit.l, 1);
+    }
+  }
+  legsFar.outline();
+  legsNear.outline();
+  const body = new PixelCanvas(w, h);
+  body.ellipse(cx - 4, fy - 12 + bob, 11, 8.5, cel(sac, { hi: 0.8 }));
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const u = (x + 0.5 - (cx - 4)) / 11, v = (y + 0.5 - (fy - 12 + bob)) / 8.5;
+      if (u * u + v * v > 0.7) continue;
+      if ((x * 3 + y * 5) % 11 === 0) body.paintOver(x, y, egg.l);
+      if ((x * 3 + y * 5) % 11 === 1) body.paintOver(x, y, egg.d);
+    }
+  body.line(cx - 12, fy - 13 + bob, cx - 2, fy - 18 + bob, sac.d);
+  body.ellipse(cx + 5, fy - 11 + bob, 4, 3.5, cel(chit, { hi: 0.7 }));
+  body.outline();
+  for (const [x, y] of [[-8, -15], [-3, -17], [-6, -10], [0, -13]] as const) {
+    body.set(cx + x, fy + y + bob, egg.h);
+    body.set(cx + x + 1, fy + y + bob, egg.l);
+  }
+  // imp torso + head riding at the front
+  const top = new PixelCanvas(w, h);
+  const tx = cx + 8, ty = fy - 15 + bob;
+  top.ellipse(tx, ty + 1, 3, 3.5, cel(imp));
+  top.ellipse(tx + 1, ty - 4, 3.8, 3.4, cel(imp, { hi: 0.8 }));
+  spike(top, tx - 1, ty - 7, -120, 3, 2, ramp(C.gold).l);
+  spike(top, tx + 3, ty - 7, -60, 3, 2, ramp(C.gold).l);
+  eye(top, tx + 1, ty - 5, 0xffe020);
+  eye(top, tx + 3, ty - 5, 0xffe020);
+  top.set(tx + 3, ty - 2, imp.o);
+  top.rect(tx + 3, ty + 1, 3, 1, imp.d);
+  top.set(tx + 6, ty + 1 - f, imp.l);
+  top.outline();
+  return out.blit(legsFar).blit(body).blit(legsNear).blit(top);
+}
+
+function wraith(f: Frame): PixelCanvas {
+  const { w, h } = ENEMY_FRAME_SIZE.wraith;
+  const out = new PixelCanvas(w, h);
+  const cx = 12, fy = h - 1;
+  const cl = ramp(WRAITH), pale = ramp(0xb8a8ff), eyeC = 0xc8f8ff;
+  const bob = f === 0 ? 0 : -1;
+  const trail = new PixelCanvas(w, h);
+  ditherEllipse(trail, cx - 6, fy - 8 + bob, 5, 6, pale.d, f);
+  ditherEllipse(trail, cx - 9, fy - 4, 3, 3, pale.m, f + 1);
+  const cloak = new PixelCanvas(w, h);
+  const hem = f === 0 ? [0, 2, 0, 3, 1, 2] : [2, 0, 3, 0, 2, 1];
+  const pts: [number, number][] = [[cx - 1, fy - 29 + bob], [cx + 5, fy - 27 + bob], [cx + 8, fy - 20 + bob], [cx + 7, fy - 10 + bob]];
+  for (let i = 0; i < hem.length; i++) pts.push([cx + 7 - i * 2.6, fy - 3 - hem[i]! + (i % 2) * 2]);
+  pts.push([cx - 7, fy - 12 + bob], [cx - 6, fy - 22 + bob]);
+  cloak.poly(pts, cel(cl, { hi: 0.75 }));
+  cloak.line(cx + 1, fy - 18 + bob, cx, fy - 5, cl.d);
+  cloak.line(cx - 3, fy - 16 + bob, cx - 4, fy - 6, cl.d);
+  cloak.outline();
+  // hood opening: deep shadow with glowing eyes
+  const hx = cx + 3, hy = fy - 22 + bob;
+  cloak.ellipse(hx, hy, 3.2, 3.6, 0x140a24);
+  cloak.set(hx - 1, hy, eyeC);
+  cloak.set(hx + 2, hy, eyeC);
+  cloak.set(hx - 1, hy + 1, 0x70c8ff);
+  cloak.set(hx + 2, hy + 1, 0x70c8ff);
+  const claw = new PixelCanvas(w, h);
+  const ay = fy - 14 + bob + f;
+  claw.line(cx + 6, ay, cx + 10, ay - 1, cl.m, 2);
+  claw.line(cx + 11, ay - 2, cx + 13, ay - 3, pale.l);
+  claw.line(cx + 11, ay, cx + 14, ay, pale.l);
+  claw.line(cx + 11, ay + 1, cx + 13, ay + 2, pale.m);
+  claw.outline();
+  return out.blit(trail).blit(cloak).blit(claw);
+}
+
+function elderWyvern(f: Frame): PixelCanvas {
+  const { w, h } = ENEMY_FRAME_SIZE.dragon;
+  const out = new PixelCanvas(w, h);
+  const cx = 29, cy = 29;
+  const r = ramp(DRAGON), be = ramp(DRAGON_GOLD), mem = ramp(0xe04a3a), memD = ramp(0x8a1a2a), horn = ramp(0xf0e0c0);
+  const up = f === 0;
+  const farWing = new PixelCanvas(w, h);
+  if (up) farWing.poly([[cx + 2, cy - 6], [cx + 10, cy - 28], [cx + 19, cy - 21], [cx + 13, cy - 5]], cel(memD));
+  else farWing.poly([[cx + 2, cy - 2], [cx + 11, cy + 15], [cx + 19, cy + 9], [cx + 13, cy - 2]], cel(memD));
+  farWing.outline();
+  const body = new PixelCanvas(w, h);
+  const ty = up ? 0 : 2;
+  bar(body, cx - 10, cy + 1, cx - 20, cy + 4 + ty, 5, cel(r));
+  bar(body, cx - 20, cy + 4 + ty, cx - 27, cy + 2 + ty * 2, 3, cel(r));
+  body.poly([[cx - 26, cy + ty * 2 - 1], [cx - 31, cy + 2 + ty * 2], [cx - 26, cy + 5 + ty * 2], [cx - 25, cy + 2 + ty * 2]], cel(be));
+  body.ellipse(cx, cy, 14, 8, cel(r, { hi: 0.85 }));
+  body.ellipse(cx + 2, cy + 4, 10, 3.5, cel(be, { hi: 0.8 }));
+  for (let x = cx - 6; x <= cx + 10; x += 3) body.paintOver(x, cy + 4, be.d);
+  for (const lx of [cx - 5, cx + 6]) {
+    body.rect(lx, cy + 6, 3, 5, cel(r));
+    body.set(lx, cy + 11, horn.l);
+    body.set(lx + 2, cy + 11, horn.l);
+  }
+  bar(body, cx + 9, cy - 2, cx + 20, cy - 12, 6, cel(r));
+  const hx = cx + 23, hy = cy - 14;
+  body.ellipse(hx, hy, 6, 4.5, cel(r, { hi: 0.8 }));
+  body.poly([[hx + 2, hy - 3], [hx + 11, hy + 1], [hx + 10, hy + 3], [hx + 2, hy + 3]], cel(r));
+  body.poly([[hx + 1, hy + 2], [hx + 9, hy + 3], [hx + 2, hy + 6]], cel(be));
+  spike(body, hx - 3, hy - 3, -165, 9, 3, cel(horn));
+  spike(body, hx - 1, hy - 4, -140, 7, 3, cel(horn));
+  for (let i = 0; i < 5; i++) spike(body, cx - 8 + i * 4, cy - 7 + Math.abs(i - 2) * 0.5, -100, 3, 3, be.l);
+  body.outline();
+  body.set(hx + 1, hy - 1, 0xffe040);
+  body.set(hx + 2, hy - 1, 0xff2020);
+  body.set(hx + 10, hy + 1, 0x301020);
+  body.set(hx + 5, hy + 3, 0xffffff);
+  body.set(hx + 7, hy + 3, 0xffffff);
+  const nearWing = new PixelCanvas(w, h);
+  if (up) {
+    nearWing.poly([[cx - 4, cy - 6], [cx - 20, cy - 29], [cx - 4, cy - 26], [cx + 8, cy - 5]], cel(mem, { hi: 0.7 }));
+    nearWing.line(cx - 3, cy - 6, cx - 20, cy - 29, r.d);
+    nearWing.line(cx - 20, cy - 29, cx - 4, cy - 26, r.m);
+    nearWing.line(cx - 12, cy - 17, cx - 8, cy - 26, r.d);
+    nearWing.line(cx - 6, cy - 10, cx - 1, cy - 25, r.d);
+  } else {
+    nearWing.poly([[cx - 4, cy - 2], [cx - 23, cy + 16], [cx - 6, cy + 20], [cx + 8, cy - 1]], cel(mem, { hi: 0.7 }));
+    nearWing.line(cx - 3, cy - 2, cx - 23, cy + 16, r.d);
+    nearWing.line(cx - 14, cy + 7, cx - 12, cy + 18, r.d);
+    nearWing.line(cx - 6, cy + 2, cx - 3, cy + 17, r.d);
+  }
+  nearWing.set(up ? cx - 20 : cx - 23, up ? cy - 29 : cy + 16, be.h);
+  nearWing.outline();
+  return out.blit(farWing).blit(body).blit(nearWing);
+}
+
 const DRAW: Record<EnemyKind, (f: Frame) => PixelCanvas> = {
   grunt: goblin,
   runner: wolfRider,
@@ -318,20 +604,29 @@ const DRAW: Record<EnemyKind, (f: Frame) => PixelCanvas> = {
   swarmling: imp,
   flyer: wyvern,
   boss: golem,
-  shaman: goblin,
-  shieldbearer: troll,
-  broodmother: troll,
-  wraith: wolfRider,
-  dragon: wyvern,
+  shaman,
+  shieldbearer: (f) => shieldOrc(f, true),
+  broodmother,
+  wraith,
+  dragon: elderWyvern,
 };
 
-const cache = new Map<EnemyKind, SpriteSheet>();
+/** Alternate frame sets: shieldbearer variant 1 = shield broken. */
+const VARIANTS: Partial<Record<EnemyKind, readonly ((f: Frame) => PixelCanvas)[]>> = {
+  shieldbearer: [(f) => shieldOrc(f, true), (f) => shieldOrc(f, false)],
+};
 
-export function getEnemySheet(kind: EnemyKind): SpriteSheet {
-  let sheet = cache.get(kind);
+const cache = new Map<string, SpriteSheet>();
+
+/** Walk sheet [walk0, walk1]. `variant` selects an alternate frame set (shieldbearer 1 = no shield). */
+export function getEnemySheet(kind: EnemyKind, variant = 0): SpriteSheet {
+  const alt = VARIANTS[kind]?.[variant];
+  const key = `${kind}:${alt ? variant : 0}`;
+  let sheet = cache.get(key);
   if (!sheet) {
-    sheet = makeSheet([DRAW[kind](0), DRAW[kind](1)]);
-    cache.set(kind, sheet);
+    const draw = alt ?? DRAW[kind];
+    sheet = makeSheet([draw(0), draw(1)]);
+    cache.set(key, sheet);
   }
   return sheet;
 }

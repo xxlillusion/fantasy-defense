@@ -103,7 +103,8 @@ export class ProjectileLayer {
     if (arr.length < 64) arr.push(v);
   }
 
-  update(s: GameSnapshot, dGame: number, f: BillboardFrame): void {
+  /** pierceTowers: towers whose arrows pierce (Piercing Longbow) get a light-streak trail. */
+  update(s: GameSnapshot, dGame: number, f: BillboardFrame, pierceTowers?: ReadonlySet<EntityId>): void {
     const seen = new Set<EntityId>();
     for (const p of s.projectiles) {
       seen.add(p.id);
@@ -116,7 +117,7 @@ export class ProjectileLayer {
         v.last.set(w.x, w.y, w.z);
         this.views.set(p.id, v);
       }
-      this.place(v, p, dGame, f);
+      this.place(v, p, dGame, f, !!pierceTowers?.has(p.sourceTowerId));
     }
     for (const [id, v] of this.views) {
       if (!seen.has(id)) {
@@ -126,7 +127,7 @@ export class ProjectileLayer {
     }
   }
 
-  private place(v: ProjView, p: ProjectileSnapshot, dGame: number, f: BillboardFrame): void {
+  private place(v: ProjView, p: ProjectileSnapshot, dGame: number, f: BillboardFrame, pierce = false): void {
     const st = STYLE[p.kind];
     const done = dist(p.from, p.pos);
     const left = dist(p.pos, p.to);
@@ -162,6 +163,16 @@ export class ProjectileLayer {
           size: p.kind === 'shockwave' ? 0.09 : 0.06,
           sizeEnd: 0.02,
         });
+      }
+      if (pierce) {
+        // long light streak behind piercing arrows
+        for (let i = 0; i < 6; i++) {
+          const k = i / 6;
+          this.glowFx.spawn({
+            x: v.last.x + (cur.x - v.last.x) * k, y: v.last.y + (cur.y - v.last.y) * k, z: v.last.z + (cur.z - v.last.z) * k,
+            life: 0.32, color: i % 3 === 0 ? 0xffffff : i % 3 === 1 ? 0x9ff7d8 : 0xfff0b0, size: 0.07, sizeEnd: 0.01,
+          });
+        }
       }
       v.last.copy(cur);
     }

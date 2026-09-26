@@ -27,6 +27,10 @@ export interface ChibiSpec {
   hem?: number;
   /** Small head ornament (L3 accent), drawn in the hair. */
   ornament?: number;
+  /** Force twin tails even with another hair style (e.g. a hood over twin tails). */
+  tails?: boolean;
+  /** Cloak/cape color, drawn behind the body flowing back. */
+  cape?: number;
 }
 
 export interface ChibiPose {
@@ -40,6 +44,8 @@ export interface ChibiPose {
   stance?: number;
   /** Eyes closed/squint (attack concentration). */
   squint?: boolean;
+  /** Per-leg offsets [dxBack, liftBack, dxFront, liftFront] (walk cycles). */
+  legs?: readonly [number, number, number, number];
 }
 
 export interface ChibiLayers {
@@ -63,7 +69,12 @@ export function drawChibi(out: PixelCanvas, s: ChibiSpec, cx: number, footY: num
   // --- behind layer: twin tails, hood tip, capes, weapons behind
   const back = new PixelCanvas(W, H);
   const hr = ramp(s.hair);
-  if (s.hairStyle === 'twintails') {
+  if (s.cape !== undefined) {
+    const r = ramp(s.cape);
+    back.poly([[cx - 3, torsoTop - 1], [cx + 4, torsoTop], [cx + 3, footY - 2], [cx - 5, footY - 1], [cx - 10, footY - 2], [cx - 7, waist]], cel(r));
+    back.line(cx - 6, waist + 2, cx - 8, footY - 3, r.d);
+  }
+  if (s.hairStyle === 'twintails' || s.tails) {
     back.ellipse(cx - 9, headCy + 4, 2.6, 7.5, cel(hr, { hi: 0.7 }));
     back.ellipse(cx + 10, headCy + 4, 2.6, 7.5, cel(hr, { hi: 0.7 }));
     back.ellipse(cx - 9.5, headCy + 10, 1.6, 2.5, hr.m);
@@ -93,9 +104,10 @@ export function drawChibi(out: PixelCanvas, s: ChibiSpec, cx: number, footY: num
   const stance = pose.stance ?? 0;
   const lr = ramp(s.legs), br = ramp(s.boots);
   const legTop = footY - 7;
-  for (const lx of [cx - 3 - stance, cx + 1 + stance]) {
-    body.rect(lx, legTop, 2, 5, cel(lr));
-    body.rect(lx, footY - 3, 3, 3, cel(br, { hi: 0.8 }));
+  const lg = pose.legs ?? [0, 0, 0, 0];
+  for (const [lx, lift] of [[cx - 3 - stance + lg[0], lg[1]], [cx + 1 + stance + lg[2], lg[3]]] as const) {
+    body.rect(lx, legTop, 2, 5 - lift, cel(lr));
+    body.rect(lx, footY - 3 - lift, 3, 3, cel(br, { hi: 0.8 }));
   }
   const top = ramp(s.top);
   body.poly([[cx - 4.5, torsoTop], [cx + 5.5, torsoTop], [cx + 5, waist + 1], [cx - 4, waist + 1]], cel(top, { hi: 0.8 }));

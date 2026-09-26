@@ -23,14 +23,13 @@ import { cast, checkCast, updateAbilities } from './abilities';
 import { buildCost, sellValue, upgradeCost } from './economy';
 import { tickStatuses, updateGroundEffects } from './effects';
 import { canSendWave, checkDefeat, checkWaveCleared, startNextWave, updateBuildCountdown } from './flow';
-import { createHero, onEnemyKilledForHero, updateHeroCombat, updateHeroMovement } from './hero';
+import { createHero, onEnemyKilledForHero, orderHeroRally, updateHeroCombat, updateHeroMovement } from './hero';
 import { applyStartModifiers } from './modifiers';
 import { moveEnemies } from './movement';
 import { updateProjectiles } from './projectiles';
 import { defaultRng, type Rng } from './rng';
 import { buildSnapshot, toTowerSnapshot } from './snapshot';
-import { spawnEnemy } from './spawner';
-import { updateSpawner } from './spawner';
+import { spawnEnemy, updateSpawner } from './spawner';
 import {
   allocId,
   createInitialState,
@@ -257,7 +256,7 @@ export function createSimulationWithOptions(events: EventBus, options: Simulatio
       const check = checkRally(point);
       if (!check.ok) return reject('setHeroRally', check.reason);
       const hero = ctx.state.hero!;
-      hero.rally = { x: point.x, y: point.y };
+      orderHeroRally(ctx.state, point);
       touch();
       events.emit('heroMoved', { rally: { ...hero.rally } });
       return OK;

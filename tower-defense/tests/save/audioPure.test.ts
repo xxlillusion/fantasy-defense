@@ -1,10 +1,11 @@
 // Pure-logic tests for Stream E audio helpers (no DOM / WebAudio needed).
 import { describe, expect, it } from 'vitest';
-import { createMusicJob } from '../../src/audio/music';
-import { SFX_DEFS, SFX_IDS } from '../../src/audio/sfxBank';
-import { renderSound } from '../../src/audio/synth';
+import { AMBIENT_SECONDS, createAmbientJob } from '../../src/audio/ambient';
+import { createMusicJob, musicSeconds } from '../../src/audio/music';
+import { PLAY_RULES, SFX_DEFS, SFX_IDS } from '../../src/audio/sfxBank';
+import { createSoundJob, peakAbs, renderSound } from '../../src/audio/synth';
 import { VoiceLimiter } from '../../src/audio/voiceLimiter';
-import { encodeWav } from '../../src/audio/wav';
+import { createWavJob, encodeWav } from '../../src/audio/wav';
 
 describe('wav encoder', () => {
   it('writes a valid 16-bit mono PCM header and length', () => {
@@ -76,5 +77,65 @@ describe('voice limiter', () => {
     l.tryStart('c', { maxVoices: 5, minInterval: 0 }, 1002, 1000);
     expect(l.duckGain(1003)).toBeLessThan(1);
     expect(l.activeCount(5000)).toBe(0);
+  });
+});
+
+describe('audio v2', () => {
+  it('chunked layer/sound rendering matches one-shot rendering', () => {
+    for (const id of ['blade_storm', 'fire_seer', 'meteor_impact'] as const) {
+      const def = SFX_DEFS[id];
+      const once = renderSound(def, 11025);
+      const job = createSoundJob(def, 11025, 777);
+      let guard = 0;
+      while (!job.step(0) && guard++ < 100000);
+      expect(job.result!.length).toBe(once.length);
+      expect(job.result!.every((x, i) => x === once[i])).toBe(true);
+    }
+  });
+
+  it('time-sliced wav encoding matches encodeWav', () => {
+    const pcm = new Float32Array(100000).map((_, i) => Math.sin(i / 10));
+    const job = createWavJob(pcm, 22050);
+    let guard = 0;
+    while (!job.step(0) && guard++ < 1000);
+    expect(new Uint8Array(job.result!)).toEqual(new Uint8Array(encodeWav(pcm, 22050)));
+  });
+
+  it('every sfx has a play rule and the v2 event sounds exist', () => {
+    for (const id of SFX_IDS) expect(PLAY_RULES[id]).toBeDefined();
+    for (const id of ['fire_volley', 'fire_overload', 'hero_attack', 'hero_levelup', 'meteor_whistle', 'meteor_impact', 'blade_storm', 'heal_chime', 'pierce_tick'] as const) {
+      expect(SFX_IDS).toContain(id);
+    }
+    // Meteor whistle is timed to the 0.8 s meteor delay; blade storm lasts its 3 s.
+    expect(renderSound(SFX_DEFS.meteor_whistle, 8000).length / 8000).toBeCloseTo(0.8, 1);
+    expect(renderSound(SFX_DEFS.blade_storm, 8000).length / 8000).toBeCloseTo(3, 1);
+  });
+
+  it('renders every theme to two equal-length, finite, non-silent stems', () => {
+    for (const theme of ['shrine', 'forge', 'ruins'] as const) {
+      const job = createMusicJob(4000, theme);
+      let guard = 0;
+      while (!job.step(50) && guard++ < 10000);
+      const r = job.result!;
+      expect(r.calm.length).toBe(r.battle.length);
+      expect(r.calm.length / r.sampleRate).toBeCloseTo(musicSeconds(theme), 1);
+      for (const stem of [r.calm, r.battle]) {
+        expect(stem.every(Number.isFinite)).toBe(true);
+        expect(peakAbs(stem)).toBeGreaterThan(0.3);
+        expect(peakAbs(stem)).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
+  it('renders ambient loops for every theme', () => {
+    for (const theme of ['shrine', 'forge', 'ruins'] as const) {
+      const job = createAmbientJob(theme, 4000);
+      let guard = 0;
+      while (!job.step(50) && guard++ < 10000);
+      const buf = job.result!;
+      expect(buf.length).toBe(AMBIENT_SECONDS * 4000);
+      expect(buf.every(Number.isFinite)).toBe(true);
+      expect(peakAbs(buf)).toBeGreaterThan(0.1);
+    }
   });
 });

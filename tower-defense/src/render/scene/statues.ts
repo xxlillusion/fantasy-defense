@@ -2,36 +2,11 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { TileCoord } from '../../core/types';
-import { fbm } from '../../art/env/noise';
-import { PAL } from '../../art/env/palette';
-import { paintStone, toTexture } from '../../art/env/textures';
-import { normalizeForMerge, tileWorld } from './util';
-
-/** Tube along a curve whose radius tapers from r0 to r1. */
-export function taperedTube(points: THREE.Vector3[], r0: number, r1: number, tubular = 24, radial = 6, flatten = 1): THREE.BufferGeometry {
-  const curve = new THREE.CatmullRomCurve3(points);
-  const geo = new THREE.TubeGeometry(curve, tubular, 1, radial, false);
-  const pos = geo.attributes.position!;
-  const frames = curve.computeFrenetFrames(tubular, false);
-  const v = new THREE.Vector3();
-  const c = new THREE.Vector3();
-  for (let i = 0; i <= tubular; i++) {
-    curve.getPointAt(i / tubular, c);
-    const r = r0 + (r1 - r0) * (i / tubular);
-    for (let j = 0; j <= radial; j++) {
-      const k = i * (radial + 1) + j;
-      v.fromBufferAttribute(pos, k).sub(c);
-      // flatten along the binormal to make blade-like crests
-      const b = frames.binormals[i]!;
-      const along = v.dot(b);
-      v.addScaledVector(b, along * (flatten - 1));
-      v.multiplyScalar(r);
-      pos.setXYZ(k, c.x + v.x, c.y + v.y, c.z + v.z);
-    }
-  }
-  geo.computeVertexNormals();
-  return geo;
-}
+import { fbm, rng } from '../../art/env/noise';
+import { PAL, type EnvPalette } from '../../art/env/palette';
+import { paintFlame, paintStone, toTexture } from '../../art/env/textures';
+import { fallenStoneGeometry } from './foliage';
+import { normalizeForMerge, taperedTube, tileWorld, type WorldPart } from './util';
 
 function crescent(): THREE.Shape {
   const s = new THREE.Shape();
@@ -210,4 +185,252 @@ export function buildStatues(statues: readonly TileCoord[], portal: TileCoord, a
     group.add(g);
   }
   return group;
+}
+
+// ------------------------------------------------------------------ v2: Ember Forge anvil-braziers
+
+const flameVert = /* glsl */ `
+uniform float uTime;
+attribute vec3 aSeed;
+varying vec2 vUv;
+varying float vHeat;
+void main() {
+  vUv = uv;
+  // camera-facing billboard: offset the corner in view space
+  float flick = 0.82 + 0.18 * sin(uTime * (9.0 + aSeed.x * 7.0) + aSeed.y * 20.0) * sin(uTime * 5.3 + aSeed.z * 9.0);
+  vec2 corner = (uv - vec2(0.5, 0.0)) * vec2(0.34 + aSeed.x * 0.14, (0.6 + aSeed.y * 0.3) * flick);
+  corner.x += sin(uTime * 3.0 + aSeed.z * 6.0 + uv.y * 3.0) * 0.04 * uv.y;
+  vec4 mv = modelViewMatrix * vec4(position, 1.0);
+  mv.xy += corner;
+  vHeat = flick;
+  gl_Position = projectionMatrix * mv;
+}`;
+
+const flameFrag = /* glsl */ `
+uniform sampler2D uMap;
+uniform vec3 uHot;
+uniform vec3 uCool;
+uniform float uLevel;
+varying vec2 vUv;
+varying float vHeat;
+void main() {
+  float a = texture2D(uMap, vUv).a;
+  vec3 col = mix(uCool, uHot, smoothstep(0.15, 0.85, a * (1.2 - vUv.y * 0.6)));
+  gl_FragColor = vec4(col * a * uLevel * vHeat, 1.0);
+}`;
+
+/**
+ * Additive camera-facing flame quads (one draw call for every bowl): `spots` are the bowl centers
+ * (world or parent space). Each spot gets 3 flickering tongues.
+ */
+export function buildFlames(spots: readonly THREE.Vector3[], anisotropy: number, hot = new THREE.Color(1.0, 0.72, 0.3).multiplyScalar(3.0), cool = new THREE.Color(1.0, 0.26, 0.05).multiplyScalar(1.6)): WorldPart & { uniforms: { uLevel: { value: number } } } {
+  const per = 3;
+  const n = spots.length * per;
+  const pos = new Float32Array(n * 4 * 3);
+  const uv = new Float32Array(n * 4 * 2);
+  const seed = new Float32Array(n * 4 * 3);
+  const idx: number[] = [];
+  let q = 0;
+  let s = 7;
+  const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+  for (const p of spots) {
+    for (let k = 0; k < per; k++, q++) {
+      const ox = (k - 1) * 0.09;
+      const oz = (rnd() - 0.5) * 0.08;
+      const sd = [rnd(), rnd() * (k === 1 ? 1 : 0.6), rnd()];
+      const corners = [[0, 0], [1, 0], [1, 1], [0, 1]];
+      corners.forEach(([u, v], c) => {
+        const i = q * 4 + c;
+        pos.set([p.x + ox, p.y, p.z + oz], i * 3);
+        uv.set([u!, v!], i * 2);
+        seed.set(sd, i * 3);
+      });
+      idx.push(q * 4, q * 4 + 1, q * 4 + 2, q * 4, q * 4 + 2, q * 4 + 3);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  geo.setAttribute('aSeed', new THREE.BufferAttribute(seed, 3));
+  geo.setIndex(idx);
+  const uniforms = {
+    uTime: { value: 0 },
+    uMap: { value: toTexture(paintFlame(), { srgb: false, anisotropy }) },
+    uHot: { value: hot },
+    uCool: { value: cool },
+    uLevel: { value: 1 },
+  };
+  const mesh = new THREE.Mesh(
+    geo,
+    new THREE.ShaderMaterial({ uniforms, vertexShader: flameVert, fragmentShader: flameFrag, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }),
+  );
+  mesh.frustumCulled = false;
+  mesh.renderOrder = 4;
+  mesh.name = 'flames';
+  return {
+    object: mesh,
+    uniforms,
+    update(time) {
+      uniforms.uTime.value = time;
+    },
+  };
+}
+
+/** Forge statues: a basalt plinth with a big iron anvil in front and a tall fire-bowl brazier behind. */
+export function buildBrazierStatues(statues: readonly TileCoord[], portal: TileCoord, pal: EnvPalette, anisotropy: number): WorldPart {
+  const group = new THREE.Group();
+  group.name = 'statues';
+  const stoneTex = toTexture(paintStone(256, 3, false), { anisotropy, repeat: true });
+  const basalt = new THREE.MeshStandardMaterial({ color: pal.statue, map: stoneTex, roughness: 0.95, metalness: 0 });
+  const iron = new THREE.MeshStandardMaterial({ color: 0x4a4e57, roughness: 0.45, metalness: 0.7, map: stoneTex });
+  const coalMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.0, 0.42, 0.12).multiplyScalar(2.2) });
+
+  const baseGeo = new THREE.BoxGeometry(0.96, 0.2, 1.9);
+  const stepGeo = new THREE.BoxGeometry(0.8, 0.22, 1.6);
+  const pillarGeo = new THREE.CylinderGeometry(0.15, 0.2, 0.95, 8);
+  const bowlGeo = new THREE.CylinderGeometry(0.36, 0.2, 0.22, 14, 1, true);
+  const rimGeo = new THREE.TorusGeometry(0.36, 0.035, 6, 20).rotateX(Math.PI / 2);
+  const coalGeo = new THREE.CircleGeometry(0.33, 14).rotateX(-Math.PI / 2);
+  const anvilTop = new THREE.BoxGeometry(0.6, 0.14, 0.3);
+  const anvilWaist = new THREE.BoxGeometry(0.28, 0.2, 0.2);
+  const anvilFoot = new THREE.BoxGeometry(0.46, 0.1, 0.34);
+  const hornGeo = new THREE.ConeGeometry(0.075, 0.34, 8).rotateZ(Math.PI / 2);
+
+  const portalX = tileWorld(portal).x;
+  const bowls: THREE.Vector3[] = [];
+  for (const s of statues) {
+    const a = tileWorld(s);
+    const b = tileWorld({ col: s.col, row: s.row + 1 });
+    const g = new THREE.Group();
+    g.position.set(a.x, 0, (a.z + b.z) / 2);
+    const side = Math.sign(a.x - portalX) || 1;
+    const add = (geo: THREE.BufferGeometry, mat: THREE.Material, x: number, y: number, z: number, ry = 0) => {
+      const m = new THREE.Mesh(geo, mat);
+      m.position.set(x, y, z);
+      m.rotation.y = ry;
+      m.castShadow = m.receiveShadow = true;
+      g.add(m);
+      return m;
+    };
+    add(baseGeo, basalt, 0, 0.1, 0);
+    add(stepGeo, basalt, 0, 0.31, 0.02);
+    // brazier (back half)
+    add(pillarGeo, iron, 0, 0.42 + 0.475, -0.42);
+    add(bowlGeo, iron, 0, 1.43, -0.42);
+    add(rimGeo, iron, 0, 1.54, -0.42);
+    const coals = new THREE.Mesh(coalGeo, coalMat);
+    coals.position.set(0, 1.48, -0.42);
+    g.add(coals);
+    // anvil (front half), horn pointing outward
+    const anvil = new THREE.Group();
+    anvil.position.set(0, 0.42, 0.4);
+    anvil.rotation.y = side * 0.15;
+    for (const [geo, y] of [[anvilFoot, 0.05], [anvilWaist, 0.2], [anvilTop, 0.37]] as const) {
+      const m = new THREE.Mesh(geo, iron);
+      m.position.y = y;
+      m.castShadow = m.receiveShadow = true;
+      anvil.add(m);
+    }
+    const horn = new THREE.Mesh(hornGeo, iron);
+    horn.position.set(side * 0.46, 0.38, 0);
+    horn.rotation.z = side > 0 ? Math.PI : 0; // cone tip (-x after rotateZ) -> outward
+    horn.castShadow = true;
+    anvil.add(horn);
+    g.add(anvil);
+    group.add(g);
+    bowls.push(new THREE.Vector3(g.position.x, 1.5, g.position.z - 0.42));
+  }
+  const flames = buildFlames(bowls, anisotropy);
+  group.add(flames.object);
+  const lights = bowls.map((p) => {
+    const l = new THREE.PointLight(0xff8a3a, 5, 5.5, 1.6);
+    l.position.set(p.x, p.y + 0.5, p.z + 0.3);
+    group.add(l);
+    return l;
+  });
+  return {
+    object: group,
+    update(time, dt) {
+      flames.update!(time, dt);
+      lights.forEach((l, i) => (l.intensity = 4.2 + 1.2 * Math.sin(time * 11 + i * 2) * Math.sin(time * 4.3 + i)));
+    },
+  };
+}
+
+// ------------------------------------------------------------------ v2: Moonlit Ruins broken columns
+
+function brokenColumnGeometry(seed: number, h: number, pal: EnvPalette): THREE.BufferGeometry {
+  const r = rng(seed);
+  const parts: THREE.BufferGeometry[] = [];
+  const add = (g: THREE.BufferGeometry, m: THREE.Matrix4) => {
+    const n = normalizeForMerge(g, false);
+    n.applyMatrix4(m);
+    parts.push(n);
+  };
+  const M = (x: number, y: number, z: number, rx = 0, ry = 0, rz = 0) => new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz)), new THREE.Vector3(1, 1, 1));
+  // square base and torus molding
+  add(new THREE.BoxGeometry(0.86, 0.2, 0.86), M(0, 0.1, 0));
+  add(new THREE.CylinderGeometry(0.4, 0.44, 0.14, 20), M(0, 0.27, 0));
+  // fluted shaft with a jagged broken top
+  const shaft = new THREE.CylinderGeometry(0.3, 0.34, h, 24, 10, false);
+  const p = shaft.attributes.position!;
+  const top = h / 2;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i);
+    const z = p.getZ(i);
+    let y = p.getY(i);
+    const a = Math.atan2(z, x);
+    const f = 1 - 0.06 * Math.max(0, Math.cos(a * 12));
+    if (y > top - 1e-4) y -= 0.05 + (0.5 + 0.5 * Math.sin(a * 3 + seed)) * 0.28 + fbm(a * 2, seed, 2, seed) * 0.12;
+    else if (y > top - h / 10 - 1e-4) y -= (0.5 + 0.5 * Math.sin(a * 3 + seed)) * 0.08;
+    p.setXYZ(i, x * f, y, z * f);
+  }
+  add(shaft, M(0, 0.34 + h / 2, 0));
+  const g = mergeGeometries(parts, false)!;
+  for (const q of parts) q.dispose();
+  g.computeVertexNormals();
+  // moss on up faces and near the ground, weathering noise
+  const stone = new THREE.Color(pal.statue);
+  const moss = new THREE.Color(pal.statueMoss);
+  const n = g.attributes.normal!;
+  const pos = g.attributes.position!;
+  const col = new Float32Array(pos.count * 3);
+  const c = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i);
+    const up = THREE.MathUtils.smoothstep(n.getY(i), 0.5, 0.9);
+    const noise = fbm(pos.getX(i) * 5 + seed, y * 4 + pos.getZ(i) * 5, 3, 9);
+    const low = 1 - THREE.MathUtils.smoothstep(y, 0.2, 1.0);
+    const m = Math.min(1, up * 0.9 + low * 0.6 * THREE.MathUtils.smoothstep(noise, 0.4, 0.6));
+    c.copy(stone).lerp(moss, m).multiplyScalar(0.82 + noise * 0.3);
+    col.set([c.r, c.g, c.b], i * 3);
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  void r;
+  return g;
+}
+
+/** Ruins statues: broken fluted columns on the back tile with toppled drums on the front tile. */
+export function buildColumnStatues(statues: readonly TileCoord[], portal: TileCoord, pal: EnvPalette, anisotropy: number): WorldPart {
+  const group = new THREE.Group();
+  group.name = 'statues';
+  const stoneTex = toTexture(paintStone(256, 3, false), { anisotropy, repeat: true });
+  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, map: stoneTex, roughness: 0.95, metalness: 0 });
+  const portalX = tileWorld(portal).x;
+  statues.forEach((s, i) => {
+    const a = tileWorld(s);
+    const b = tileWorld({ col: s.col, row: s.row + 1 });
+    const side = Math.sign(a.x - portalX) || 1;
+    const col = new THREE.Mesh(brokenColumnGeometry(31 + i * 7, i % 2 ? 1.55 : 2.25, pal), mat);
+    col.position.set(a.x, 0, a.z + 0.05);
+    col.rotation.y = i * 1.3;
+    const rubble = new THREE.Mesh(fallenStoneGeometry(77 + i * 13, pal), mat);
+    rubble.position.set(b.x + side * 0.08, 0, b.z + 0.05);
+    rubble.rotation.y = side * 0.6;
+    for (const m of [col, rubble]) {
+      m.castShadow = m.receiveShadow = true;
+      group.add(m);
+    }
+  });
+  return { object: group };
 }

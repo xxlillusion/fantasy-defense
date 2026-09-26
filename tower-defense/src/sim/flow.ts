@@ -1,8 +1,9 @@
 // Game phase flow: sending waves, build countdown, wave clear, victory and defeat.
 // Stream A2 owns this file (v2: endless, interest, score in gameOver).
 import { mapWaves, RULES, type WaveDef } from '../data';
-import { computeStars, earlySendBonus, earnGold, waveClearBonus } from './economy';
+import { computeStars, earlySendBonus, earnGold, interestOn, waveClearBonus } from './economy';
 import { generateEndlessWave } from './endless';
+import { applyWaveModifiers, interestAllowed } from './modifiers';
 import { computeScore } from './score';
 import { buildSpawnQueue } from './spawner';
 import type { SimContext, SimState } from './state';
@@ -12,12 +13,16 @@ export function campaignWaves(state: SimState): number {
   return mapWaves(state.map).length;
 }
 
-/** Wave definition for a 1-based wave number (endless waves past the campaign are generated). */
+/**
+ * Wave definition for a 1-based wave number (endless waves past the campaign are generated), with
+ * wave modifiers (horde) applied, so the preview, lane preview and spawn queue all agree.
+ */
 export function waveDef(state: SimState, wave: number): WaveDef | null {
   const list = mapWaves(state.map);
-  if (wave >= 1 && wave <= list.length) return list[wave - 1]!;
-  if (state.mode === 'endless' && wave > list.length) return generateEndlessWave(state, wave);
-  return null;
+  let def: WaveDef | null = null;
+  if (wave >= 1 && wave <= list.length) def = list[wave - 1]!;
+  else if (state.mode === 'endless' && wave > list.length) def = generateEndlessWave(state, wave);
+  return def ? applyWaveModifiers(state, def) : null;
 }
 
 export function canSendWave(ctx: SimContext): boolean {
@@ -63,9 +68,9 @@ export function checkDefeat(ctx: SimContext): boolean {
   return true;
 }
 
-/** TODO(A2): min(floor(gold * RULES.interestRate), RULES.interestCap); 0 with the austerity modifier. */
-export function interestFor(_state: SimState): number {
-  return 0;
+/** min(floor(gold * RULES.interestRate), RULES.interestCap); 0 with the austerity modifier. */
+export function interestFor(state: SimState): number {
+  return interestAllowed(state) ? interestOn(state.gold) : 0;
 }
 
 /** Wave phase: when nothing is left to spawn and nothing is alive, the wave is cleared. */

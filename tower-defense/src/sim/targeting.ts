@@ -1,4 +1,5 @@
 // Target validity, targeting modes and chain-lightning target selection.
+// Stream A1 owns this file (v2: stealth, cross-lane targeting by `remaining`).
 import type { TargetMode, Vec2 } from '../core/types';
 import type { TowerDef } from '../data';
 import { EPS, type EnemyState } from './state';
@@ -8,8 +9,14 @@ export interface HitMask {
   hitsGround: boolean;
 }
 
-export function canHit(mask: HitMask, enemy: EnemyState): boolean {
+/** Alive, matches the air/ground mask, and ignoring stealth (burning ground, forced hits). */
+export function canTouch(mask: HitMask, enemy: EnemyState): boolean {
   return enemy.alive && (enemy.def.flying ? mask.hitsAir : mask.hitsGround);
+}
+
+/** A valid target: alive, matches the mask, and visible (stealthed enemies must be revealed). */
+export function canHit(mask: HitMask, enemy: EnemyState): boolean {
+  return enemy.revealed && canTouch(mask, enemy);
 }
 
 /** Squared distance (avoids Math.hypot in hot loops). */
@@ -19,22 +26,37 @@ export function distSq(a: Vec2, b: Vec2): number {
   return dx * dx + dy * dy;
 }
 
-export function enemiesInRange(enemies: readonly EnemyState[], mask: HitMask | TowerDef, center: Vec2, range: number): EnemyState[] {
+/**
+ * Valid enemies within `range` of `center`. Unrevealed stealth enemies are skipped unless
+ * `includeHidden` is set (burning ground hurts everything standing in it).
+ */
+export function enemiesInRange(
+  enemies: readonly EnemyState[],
+  mask: HitMask | TowerDef,
+  center: Vec2,
+  range: number,
+  includeHidden = false,
+): EnemyState[] {
   const r = range + EPS;
   const r2 = r * r;
+  const test = includeHidden ? canTouch : canHit;
   const out: EnemyState[] = [];
-  for (const e of enemies) if (canHit(mask, e) && distSq(e.pos, center) <= r2) out.push(e);
+  for (const e of enemies) if (test(mask, e) && distSq(e.pos, center) <= r2) out.push(e);
   return out;
 }
 
-/** Comparator for a targeting mode (negative = a is the better target). Ties: furthest along, then id. */
+/**
+ * Comparator for a targeting mode (negative = a is the better target).
+ * Lanes differ in length, so "first"/"last" compare `remaining` (distance to the portal), not progress.
+ * Ties: closest to the portal (smallest remaining), then lowest id.
+ */
 export function modeComparator(mode: TargetMode, from: Vec2): (a: EnemyState, b: EnemyState) => number {
-  const tie = (a: EnemyState, b: EnemyState) => b.progress - a.progress || a.id - b.id;
+  const tie = (a: EnemyState, b: EnemyState) => a.remaining - b.remaining || a.id - b.id;
   switch (mode) {
     case 'first':
       return tie;
     case 'last':
-      return (a, b) => a.progress - b.progress || a.id - b.id;
+      return (a, b) => b.remaining - a.remaining || a.id - b.id;
     case 'strongest':
       return (a, b) => b.hp - a.hp || tie(a, b);
     case 'closest':
@@ -86,4 +108,16 @@ export function buildChain(
     prev = best;
   }
   return chain;
+}
+
+/** Distance from point p to the segment a-b, and the segment parameter t (0..1) of the closest point. */
+export function pointSegment(p: Vec2, a: Vec2, b: Vec2): { dist: number; t: number } {
+  const abx = b.x - a.x;
+  const aby = b.y - a.y;
+  const len2 = abx * abx + aby * aby;
+  let t = len2 > 0 ? ((p.x - a.x) * abx + (p.y - a.y) * aby) / len2 : 0;
+  t = Math.min(1, Math.max(0, t));
+  const cx = a.x + abx * t;
+  const cy = a.y + aby * t;
+  return { dist: Math.hypot(p.x - cx, p.y - cy), t };
 }

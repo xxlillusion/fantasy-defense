@@ -1,19 +1,24 @@
-// Stream D entry point: HTML/CSS overlay UI (HUD, tower bar/panel, wave button, screens).
+// Stream D entry point: HTML/CSS overlay UI (HUD, tower bar/panel, hero, abilities, wave button, screens).
 import '../styles/ui.css';
 import type { CommandResult } from '../core/commands';
 import type { CreateUi, IUi, UiContext, UiSound } from '../core/interfaces';
-import type { EntityId, GamePhase, GameSnapshot, Stars, TowerKind, WaveGroupPreview } from '../core/types';
-import { DIFFICULTIES, TOWERS } from '../data';
+import type { AbilityId, EnemyKind, EntityId, GameOptions, GamePhase, GameSnapshot, TowerKind, WaveGroupPreview } from '../core/types';
+import { ABILITIES, DIFFICULTIES, getMap, HERO, mapWaves, TOWERS } from '../data';
+import { AbilityBar } from './abilityBar';
+import { CanvasInput } from './canvasInput';
 import { h } from './dom';
+import { EnemyTooltip } from './enemyTooltip';
 import { FloatingText } from './floatingText';
+import { HeroPanel, HeroPortrait } from './hero';
 import { Hud } from './hud';
 import { installKeyboard } from './input';
-import { Placement } from './placement';
-import { GameOverScreen } from './screens/gameOver';
+import { GameOverScreen, type RunResult } from './screens/gameOver';
+import { HelpScreen } from './screens/help';
+import { IntroCard } from './screens/intro';
 import { PauseScreen } from './screens/pause';
 import { SettingsScreen } from './screens/settings';
 import { TitleScreen } from './screens/title';
-import { inGame, type ToastKind, type Ui, type UiState } from './shared';
+import { inGame, keyLabel, type Overlay, type ToastKind, type Ui, type UiState } from './shared';
 import { Toasts } from './toasts';
 import { Tooltip } from './tooltip';
 import { TowerBar } from './towerBar';
@@ -23,6 +28,7 @@ import { WaveButton } from './waveButton';
 class OverlayUi implements IUi, Ui {
   ctx!: UiContext;
   state!: UiState;
+  tooltip!: Tooltip;
 
   private layer!: HTMLElement;
   private gameLayer!: HTMLElement;
@@ -30,18 +36,25 @@ class OverlayUi implements IUi, Ui {
   private bar!: TowerBar;
   private panel!: TowerPanel;
   private wave!: WaveButton;
+  private abilities!: AbilityBar;
+  private portrait!: HeroPortrait;
+  private heroPanel!: HeroPanel;
+  private enemyTip!: EnemyTooltip;
   private floating!: FloatingText;
   private toasts!: Toasts;
-  private tooltip!: Tooltip;
   private title!: TitleScreen;
   private settingsScreen!: SettingsScreen;
   private pause!: PauseScreen;
+  private help!: HelpScreen;
+  private intro!: IntroCard;
   private gameOver!: GameOverScreen;
-  private placement!: Placement;
+  private canvas!: CanvasInput;
 
   private disposers: (() => void)[] = [];
   private phase: GamePhase | null = null;
-  private prevBest: Stars = 0;
+  private run_: RunResult | null = null;
+  /** Options of the running game (events fire before the next frame's snapshot, so don't rely on it there). */
+  private options: GameOptions | null = null;
   private rejectCount = 0;
   private querying = 0;
   private selKey = '';
@@ -49,10 +62,26 @@ class OverlayUi implements IUi, Ui {
   private lastLives = -1;
   private warned = { half: false, low: false };
   private lastHover: Element | null = null;
+  /** Ability unlock tracking (toast on false → true). null = not yet sampled this game. */
+  private unlocked: Map<AbilityId, boolean> | null = null;
+  /** Whether the help overlay paused the game (so closing it resumes). */
+  private helpPaused = false;
+  /** Pause state set by the UI since the last frame (the frame snapshot lags behind commands). */
+  private pauseIntent: boolean | null = null;
 
   init(ctx: UiContext): void {
     this.ctx = ctx;
-    this.state = { placing: null, selected: null, overlay: 'none', settingsFrom: 'title', settings: ctx.save.getSettings(), sellArmed: null };
+    this.state = {
+      placing: null,
+      selected: null,
+      heroSelected: false,
+      targeting: null,
+      overlay: 'none',
+      settingsFrom: 'title',
+      settings: ctx.save.getSettings(),
+      sellArmed: null,
+      best: null,
+    };
 
     this.tooltip = new Tooltip();
     this.toasts = new Toasts();
@@ -61,24 +90,24 @@ class OverlayUi implements IUi, Ui {
     this.bar = new TowerBar(this, this.tooltip);
     this.panel = new TowerPanel(this);
     this.wave = new WaveButton(this);
+    this.abilities = new AbilityBar(this);
+    this.portrait = new HeroPortrait(this);
+    this.heroPanel = new HeroPanel(this);
+    this.enemyTip = new EnemyTooltip((pos, height) => ctx.view.worldToScreen(pos, height));
     this.title = new TitleScreen(this);
     this.settingsScreen = new SettingsScreen(this);
     this.pause = new PauseScreen(this);
+    this.help = new HelpScreen(this);
+    this.intro = new IntroCard(this);
     this.gameOver = new GameOverScreen(this);
-    this.placement = new Placement(this, (fn) => {
-      this.querying++;
-      try {
-        return fn();
-      } finally {
-        this.querying--;
-      }
-    });
+    this.canvas = new CanvasInput(this, this.enemyTip);
 
     this.gameLayer = h(
       'div.game-ui.is-hidden',
       null,
       this.hud.el,
-      h('div.bottom-row', null, h('div.bottom-spacer'), this.bar.el, this.wave.el),
+      h('div.bottom-row', null, h('div.bottom-left', null, this.portrait.el, this.abilities.el), this.bar.el, this.wave.el),
+      this.heroPanel.el,
       this.panel.el,
     );
     this.layer = h(
@@ -90,15 +119,18 @@ class OverlayUi implements IUi, Ui {
       this.toasts.el,
       this.title.el,
       this.gameOver.el,
+      this.intro.el,
       this.pause.el,
+      this.help.el,
       this.settingsScreen.el,
+      this.enemyTip.el,
       this.tooltip.el,
     );
     ctx.root.append(this.layer);
 
     this.wireEvents();
-    this.disposers.push(installKeyboard(this, this.panel, this.title, this.gameOver));
-    this.disposers.push(() => this.placement.dispose());
+    this.disposers.push(installKeyboard(this, { panel: this.panel, title: this.title, gameOver: this.gameOver, intro: this.intro }));
+    this.disposers.push(() => this.canvas.dispose());
 
     // audio unlock on first gesture
     const unlock = () => {
@@ -129,17 +161,35 @@ class OverlayUi implements IUi, Ui {
     const ev = this.ctx.events;
     const on = this.disposers;
     on.push(
-      ev.on('gameStarted', ({ difficulty, mapId }) => {
-        this.prevBest = this.ctx.save.getBestStars(mapId, difficulty);
+      ev.on('gameStarted', (opts) => {
+        const { difficulty, mapId, mode } = opts;
+        this.options = { ...opts, modifiers: [...opts.modifiers] };
+        this.state.best = this.ctx.save.getBest(mapId, difficulty, mode);
+        this.run_ = null;
         this.resetGameState();
+        this.hud.reset();
         this.warned = { half: false, low: false };
         this.lastLives = -1;
-        this.toasts.banner('Waterfall Shrine', `${DIFFICULTIES[difficulty].name} · Build your defenses`, 'wave', 2600);
+        this.unlocked = null;
+        this.title.leave();
+        this.ctx.view.setTitleMode(false);
+        this.toasts.banner(getMap(mapId).name, `${DIFFICULTIES[difficulty].name} · ${mode === 'endless' ? 'Endless' : 'Campaign'} · Build your defenses`, 'wave', 2600);
       }),
     );
-    on.push(ev.on('gameExited', () => this.resetGameState()));
+    on.push(
+      ev.on('gameExited', () => {
+        this.options = null;
+        this.resetGameState();
+      }),
+    );
+    on.push(
+      ev.on('gameOver', ({ score, wave }) => {
+        this.run_ = { score, wave };
+      }),
+    );
     on.push(ev.on('enemyDamaged', ({ enemyId, amount, pos, crit }) => this.floating.damage(enemyId, pos, amount, crit)));
     on.push(ev.on('enemyKilled', ({ pos, bounty }) => this.floating.gold(pos, bounty)));
+    on.push(ev.on('enemySpawned', ({ enemy }) => this.onEnemySpawned(enemy.kind)));
     on.push(
       ev.on('commandRejected', ({ reason }) => {
         if (this.querying > 0) return;
@@ -150,28 +200,65 @@ class OverlayUi implements IUi, Ui {
     );
     on.push(
       ev.on('waveStarted', ({ wave, early, bonus }) => {
-        const s = this.ctx.getSnapshot();
-        const boss = this.lastNextWave?.some((g) => g.enemy === 'boss');
-        const sub = boss ? 'A colossal foe approaches!' : s.totalWaves === null ? 'Endless' : wave === s.totalWaves ? 'Final wave!' : `${s.totalWaves - wave} more to go`;
+        const o = this.options;
+        const next = this.lastNextWave;
+        const dragon = next?.some((g) => g.enemy === 'dragon');
+        const golem = next?.some((g) => g.enemy === 'boss');
+        const boss = dragon || golem;
+        const campaignLen = !o || o.mode === 'endless' ? null : mapWaves(getMap(o.mapId)).length;
+        let sub: string;
+        if (dragon) sub = 'The Elder Wyvern takes flight!';
+        else if (golem) sub = 'A colossal foe approaches!';
+        else if (campaignLen === null) sub = wave > 20 ? 'Endless · the tide keeps rising' : 'Endless';
+        else sub = wave === campaignLen ? 'Final wave!' : `${campaignLen - wave} more to go`;
         this.toasts.banner(`Wave ${wave}`, sub, boss ? 'boss' : 'wave');
         if (early && bonus > 0) this.toast(`Early send +${bonus} gold`, 'gold');
       }),
     );
     on.push(
-      ev.on('waveCleared', ({ wave, bonus }) => {
-        const s = this.ctx.getSnapshot();
-        if (s.totalWaves !== null && wave >= s.totalWaves) return; // victory screen takes over
-        this.toasts.banner('Wave cleared', `+${bonus} gold`, 'clear', 1800);
+      ev.on('waveCleared', ({ wave, bonus, interest }) => {
+        const o = this.options;
+        if (o && o.mode === 'campaign' && wave >= mapWaves(getMap(o.mapId)).length) return; // victory screen takes over
+        this.toasts.banner('Wave cleared', interest > 0 ? `+${bonus} gold · +${interest} interest` : `+${bonus} gold`, 'clear', 2000);
       }),
     );
+    on.push(ev.on('heroLevelUp', ({ level }) => this.toast(`${HERO.name} reached level ${level}!`, 'gold')));
+    on.push(
+      ev.on('heroDowned', () => {
+        const lv = this.ctx.getSnapshot().hero?.level ?? 1;
+        const secs = Math.max(1, HERO.respawnBase - HERO.respawnPerLevel * (lv - 1));
+        this.toast(`${HERO.name} has fallen! Back in ${secs}s`, 'warn');
+      }),
+    );
+    on.push(ev.on('heroRespawned', () => this.toast(`${HERO.name} rises again`, 'info')));
+  }
+
+  private onEnemySpawned(kind: EnemyKind): void {
+    if (!this.options) return;
+    if (this.state.overlay === 'intro' || this.state.overlay === 'none') {
+      const wasShowing = this.intro.showing;
+      this.intro.offer(kind);
+      if (!wasShowing && this.intro.showing) this.onIntroOpened();
+    }
+  }
+
+  private onIntroOpened(): void {
+    this.cancelPlacing();
+    this.cancelTargeting();
+    this.syncOverlays();
   }
 
   private resetGameState(): void {
     this.state.placing = null;
     this.state.selected = null;
+    this.state.heroSelected = false;
+    this.state.targeting = null;
     this.state.sellArmed = null;
     this.state.overlay = 'none';
-    this.placement.clearGhost();
+    this.helpPaused = false;
+    this.intro.reset();
+    this.canvas.clearGhost();
+    this.enemyTip.hide();
     this.floating.clear();
     this.toasts.clear();
     this.tooltip.hide();
@@ -202,6 +289,15 @@ class OverlayUi implements IUi, Ui {
     return r;
   }
 
+  query<T>(fn: () => T): T {
+    this.querying++;
+    try {
+      return fn();
+    } finally {
+      this.querying--;
+    }
+  }
+
   startPlacing(kind: TowerKind): void {
     const s = this.snap();
     if (!inGame(s)) return;
@@ -212,24 +308,85 @@ class OverlayUi implements IUi, Ui {
       return;
     }
     this.select(null);
+    this.state.heroSelected = false;
+    this.state.targeting = null;
     this.state.placing = kind;
     this.sfx('click');
-    this.placement.invalidate();
+    this.canvas.invalidate();
   }
 
   cancelPlacing(): void {
     this.state.placing = null;
-    this.placement.clearGhost();
+    this.canvas.clearGhost();
+  }
+
+  cancelTargeting(): void {
+    if (!this.state.targeting) return;
+    this.state.targeting = null;
+    this.canvas.clearGhost();
   }
 
   select(id: EntityId | null): void {
-    if (id !== null) this.cancelPlacing();
+    if (id !== null) {
+      this.cancelPlacing();
+      this.cancelTargeting();
+      this.state.heroSelected = false;
+    }
     if (this.state.selected !== id) this.state.sellArmed = null;
     this.state.selected = id;
   }
 
+  selectHero(on: boolean): void {
+    const s = this.snap();
+    if (on && (!inGame(s) || !s.hero)) return;
+    if (on === this.state.heroSelected) return;
+    if (on) {
+      this.select(null);
+      this.cancelPlacing();
+      this.cancelTargeting();
+      this.sfx('open');
+    } else this.sfx('close');
+    this.state.heroSelected = on;
+    this.canvas.invalidate();
+    if (!on) this.canvas.clearGhost();
+  }
+
+  useAbility(id: AbilityId): void {
+    const s = this.snap();
+    if (!inGame(s)) return;
+    const def = ABILITIES[id];
+    const a = s.abilities.find((x) => x.id === id);
+    if (a && !a.unlocked) {
+      this.sfx('error');
+      this.toast(`${def.name} unlocks at wave ${a.unlockWave}`, 'error');
+      return;
+    }
+    if (def.targeted) {
+      if (this.state.targeting === id) {
+        this.cancelTargeting();
+        this.sfx('close');
+        return;
+      }
+      if (a && a.cooldown > 0) {
+        this.sfx('error');
+        this.toast(`${def.name} ready in ${Math.ceil(a.cooldown)}s`, 'error');
+        return;
+      }
+      this.select(null);
+      this.cancelPlacing();
+      this.state.heroSelected = false;
+      this.state.targeting = id;
+      this.sfx('click');
+      this.canvas.invalidate();
+      return;
+    }
+    // Success sound comes from the audio module's abilityCast handler.
+    this.run(() => this.ctx.commands.castAbility(id));
+  }
+
   sendWave(): void {
     const s = this.snap();
+    if (!inGame(s)) return;
     if (s.phase !== 'build') {
       this.sfx('error');
       this.toast('A wave is already underway', 'error');
@@ -246,66 +403,118 @@ class OverlayUi implements IUi, Ui {
   }
 
   togglePause(): void {
-    const s = this.snap();
-    this.ctx.commands.setPaused(!s.paused);
-    this.sfx(s.paused ? 'close' : 'open');
+    const was = this.isPaused();
+    this.setPaused(!was);
+    this.sfx(was ? 'close' : 'open');
+  }
+
+  isPaused(): boolean {
+    return this.pauseIntent ?? this.snap().paused;
+  }
+
+  setPaused(p: boolean): void {
+    this.pauseIntent = p;
+    this.ctx.commands.setPaused(p);
   }
 
   openPause(): void {
     if (!inGame(this.snap())) return;
-    this.ctx.commands.setPaused(true);
-    this.state.overlay = 'pause';
-    this.tooltip.hide();
+    this.setPaused(true);
+    this.setOverlay('pause');
     this.pause.reset();
     this.sfx('open');
-    this.syncOverlays();
+  }
+
+  openHelp(): void {
+    if (this.state.overlay !== 'none') return;
+    const s = this.snap();
+    this.helpPaused = inGame(s) && !this.isPaused();
+    if (this.helpPaused) this.setPaused(true);
+    this.setOverlay('help');
+    this.sfx('open');
   }
 
   closeOverlay(): void {
-    if (this.state.overlay === 'settings') {
+    const o = this.state.overlay;
+    if (o === 'settings') {
       this.saveSettings();
-      this.state.overlay = this.state.settingsFrom === 'pause' && inGame(this.snap()) ? 'pause' : 'none';
-      if (this.state.overlay === 'pause') this.pause.reset();
-    } else if (this.state.overlay === 'pause') {
+      const back = this.state.settingsFrom === 'pause' && inGame(this.snap());
+      this.state.overlay = back ? 'pause' : 'none';
+      if (back) this.pause.reset();
+    } else if (o === 'pause') {
       this.state.overlay = 'none';
-      this.ctx.commands.setPaused(false);
+      this.setPaused(false);
+    } else if (o === 'help') {
+      this.state.overlay = 'none';
+      if (this.helpPaused && inGame(this.snap())) this.setPaused(false);
+      this.helpPaused = false;
+    } else if (o === 'intro') {
+      this.intro.dismiss();
     }
     this.syncOverlays();
   }
 
   openSettings(from: 'title' | 'pause'): void {
     this.state.settingsFrom = from;
-    this.state.overlay = 'settings';
+    this.setOverlay('settings');
     this.settingsScreen.sync();
-    this.syncOverlays();
   }
 
   saveSettings(): void {
     this.ctx.save.saveSettings(this.state.settings);
   }
 
+  private setOverlay(o: Overlay): void {
+    this.state.overlay = o;
+    this.tooltip.hide();
+    this.enemyTip.hide();
+    this.syncOverlays();
+  }
+
   private syncOverlays(): void {
     const o = this.state.overlay;
     this.pause.el.classList.toggle('is-hidden', o !== 'pause');
     this.settingsScreen.el.classList.toggle('is-hidden', o !== 'settings');
+    this.help.el.classList.toggle('is-hidden', o !== 'help');
   }
 
   // ---------------------------------------------------------------- IUi
 
   update(s: GameSnapshot, dtReal: number): void {
+    this.pauseIntent = null;
     if (s.phase !== this.phase) this.onPhase(s);
 
     if (inGame(s)) {
-      this.hud.update(s);
+      if (this.state.heroSelected && !s.hero) this.state.heroSelected = false;
+      this.hud.update(s, dtReal);
       this.bar.update(s);
       this.wave.update(s);
+      this.abilities.update(s);
+      this.portrait.update(s);
+      this.heroPanel.update(s);
       this.panel.update(s);
-      this.placement.update(s);
+      this.canvas.update(s);
       this.syncSelection(s);
       this.checkLives(s);
+      this.checkUnlocks(s);
       if (s.phase === 'build') this.lastNextWave = s.nextWave;
     }
     this.floating.update(dtReal, s.paused || !inGame(s));
+  }
+
+  private checkUnlocks(s: GameSnapshot): void {
+    const first = this.unlocked === null;
+    const map = this.unlocked ?? new Map<AbilityId, boolean>();
+    for (const a of s.abilities) {
+      const was = map.get(a.id);
+      if (!first && was === false && a.unlocked) {
+        const d = ABILITIES[a.id];
+        this.toast(`${d.name} unlocked! Press ${keyLabel(d.hotkey)}`, 'gold');
+        this.abilities.flash(a.id);
+      }
+      map.set(a.id, a.unlocked);
+    }
+    this.unlocked = map;
   }
 
   private onPhase(s: GameSnapshot): void {
@@ -318,22 +527,35 @@ class OverlayUi implements IUi, Ui {
     if (s.phase === 'title') {
       this.title.showMain();
       this.gameOver.hide();
-      if (this.state.overlay === 'pause') this.state.overlay = 'none';
+      this.intro.reset();
+      if (this.state.overlay === 'pause' || this.state.overlay === 'intro') this.state.overlay = 'none';
+      this.ctx.view.setTitleMode(true);
+    } else if (prev === 'title' || prev === null) {
+      this.ctx.view.setTitleMode(false);
+      this.title.leave();
     }
     if (game) this.gameOver.hide();
     if (s.phase === 'victory' || s.phase === 'defeat') {
       this.cancelPlacing();
+      this.cancelTargeting();
       this.select(null);
+      this.state.heroSelected = false;
       this.ctx.view.setSelection(null);
       this.selKey = '';
+      this.intro.reset();
       this.state.overlay = 'none';
       this.tooltip.hide();
-      this.gameOver.show(s, this.prevBest);
+      this.enemyTip.hide();
+      this.canvas.clearGhost();
+      this.gameOver.show(s, this.state.best, this.run_);
       this.sfx('open');
     }
     if (!game && prev !== null) {
+      this.canvas.reset();
       this.cancelPlacing();
+      this.cancelTargeting();
       this.select(null);
+      this.state.heroSelected = false;
       this.syncSelection(s);
     }
     this.syncOverlays();
@@ -373,6 +595,7 @@ class OverlayUi implements IUi, Ui {
     this.disposers = [];
     this.ctx.view.setPlacementGhost(null);
     this.ctx.view.setSelection(null);
+    this.ctx.view.setMapPreview(null);
     this.layer.remove();
   }
 }

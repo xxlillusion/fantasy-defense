@@ -22,6 +22,24 @@ const EVENT_NAMES: GameEventName[] = [
   'waveStarted',
   'waveCleared',
   'commandRejected',
+  // v2
+  'enemyHealed',
+  'shieldBlocked',
+  'shieldBroken',
+  'enemySplit',
+  'enemyRevealed',
+  'enemyExecuted',
+  'pierceHit',
+  'heroSpawned',
+  'heroMoved',
+  'heroAttacked',
+  'heroDamaged',
+  'heroDowned',
+  'heroRespawned',
+  'heroLevelUp',
+  'abilityCast',
+  'abilityEnded',
+  'meteorImpact',
 ];
 
 export interface Recorded {

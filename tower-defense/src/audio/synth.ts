@@ -102,10 +102,18 @@ const TAU = Math.PI * 2;
 const WAVE_CODE: Record<Wave, number> = { square: 0, saw: 1, sine: 2, triangle: 3, noise: 4 };
 
 export function renderLayer(out: Float32Array, sr: number, l: Layer, rng: () => number, offset = 0, wrap = false, gain = 1): void {
+  makeLayerRenderer(out, sr, l, rng, offset, wrap, gain)(Infinity);
+}
+
+/**
+ * Resumable version of renderLayer: returns `run(maxSamples)`, which renders the next chunk and returns
+ * true once the layer is complete. Chunked output is identical to a single renderLayer call.
+ */
+export function makeLayerRenderer(out: Float32Array, sr: number, l: Layer, rng: () => number, offset = 0, wrap = false, gain = 1): (maxSamples: number) => boolean {
   const start = offset + Math.round((l.delay ?? 0) * sr);
   const e = l.env;
   const n = Math.ceil(envLength(e) * sr);
-  if (n <= 0) return;
+  if (n <= 0) return () => true;
   // Envelope segment boundaries in samples.
   const aN = Math.max(1, e.a * sr);
   const dN = (e.d ?? 0) * sr;
@@ -149,53 +157,61 @@ export function renderLayer(out: Float32Array, sr: number, l: Layer, rng: () => 
   let fBase = f0;
   let lpA = lpA0;
   const len = out.length;
-  for (let i = 0; i < n; i++) {
-    let f = fBase;
-    fBase *= slideMul;
-    if (vibD) f *= 1 + vibD * Math.sin(vibK * i);
-    if (arpR) f *= arpR[((i * arpInv) | 0) % arpR.length];
-    let x = 0;
-    for (let u = 0; u < nu; u++) {
-      let ph = phases[u] + f * detunes[u];
-      if (ph >= 1) {
-        ph -= ph | 0;
-        if (wave === 4) noiseVals[u] = rng() * 2 - 1;
+  let i = 0;
+  return (maxSamples) => {
+    const stop = Math.min(n, i + maxSamples);
+    for (; i < stop; i++) {
+      let f = fBase;
+      fBase *= slideMul;
+      if (vibD) f *= 1 + vibD * Math.sin(vibK * i);
+      if (arpR) f *= arpR[((i * arpInv) | 0) % arpR.length];
+      let x = 0;
+      for (let u = 0; u < nu; u++) {
+        let ph = phases[u] + f * detunes[u];
+        if (ph >= 1) {
+          ph -= ph | 0;
+          if (wave === 4) noiseVals[u] = rng() * 2 - 1;
+        }
+        phases[u] = ph;
+        if (wave === 0) x += ph < duty ? 1 : -1;
+        else if (wave === 1) x += 2 * ph - 1;
+        else if (wave === 2) x += Math.sin(TAU * ph);
+        else if (wave === 3) x += ph < 0.5 ? 4 * ph - 1 : 3 - 4 * ph;
+        else x += noiseVals[u];
       }
-      phases[u] = ph;
-      if (wave === 0) x += ph < duty ? 1 : -1;
-      else if (wave === 1) x += 2 * ph - 1;
-      else if (wave === 2) x += Math.sin(TAU * ph);
-      else if (wave === 3) x += ph < 0.5 ? 4 * ph - 1 : 3 - 4 * ph;
-      else x += noiseVals[u];
+      if (nu > 1) x *= uGain;
+      if (lpOn) {
+        lp1 += lpA * (x - lp1);
+        if (steep) {
+          lp2 += lpA * (lp1 - lp2);
+          x = lp2;
+        } else x = lp1;
+        lpA += lpDA;
+      }
+      if (hpA) {
+        hpState += hpA * (x - hpState);
+        x -= hpState;
+      }
+      let env: number;
+      if (i < aN) env = i / aN;
+      else if (i < adN) env = 1 - ((1 - sus) * (i - aN)) / dN;
+      else if (i < adhN) env = sus;
+      else {
+        const r = 1 - (i - adhN) / rN;
+        env = r > 0 ? sus * r * r : 0;
+      }
+      let idx = start + i;
+      if (idx >= len) {
+        if (!wrap) {
+          i = n;
+          return true;
+        }
+        idx %= len;
+      }
+      out[idx] += x * env * vol;
     }
-    if (nu > 1) x *= uGain;
-    if (lpOn) {
-      lp1 += lpA * (x - lp1);
-      if (steep) {
-        lp2 += lpA * (lp1 - lp2);
-        x = lp2;
-      } else x = lp1;
-      lpA += lpDA;
-    }
-    if (hpA) {
-      hpState += hpA * (x - hpState);
-      x -= hpState;
-    }
-    let env: number;
-    if (i < aN) env = i / aN;
-    else if (i < adN) env = 1 - ((1 - sus) * (i - aN)) / dN;
-    else if (i < adhN) env = sus;
-    else {
-      const r = 1 - (i - adhN) / rN;
-      env = r > 0 ? sus * r * r : 0;
-    }
-    let idx = start + i;
-    if (idx >= len) {
-      if (!wrap) break;
-      idx %= len;
-    }
-    out[idx] += x * env * vol;
-  }
+    return i >= n;
+  };
 }
 
 function applyEcho(buf: Float32Array, sr: number, echo: NonNullable<SoundDef['echo']>): void {
@@ -205,14 +221,27 @@ function applyEcho(buf: Float32Array, sr: number, echo: NonNullable<SoundDef['ec
   for (let i = 0; i < buf.length; i++) buf[i] += wet[i] * echo.mix;
 }
 
+/** Peak |x| over [from, to). */
+export function peakAbs(buf: Float32Array, from = 0, to = buf.length): number {
+  let m = 0;
+  for (let i = from; i < to; i++) {
+    const a = Math.abs(buf[i]);
+    if (a > m) m = a;
+  }
+  return m;
+}
+
 /** Normalize peak to `peak`, with a tanh soft clip for safety. */
 export function normalize(buf: Float32Array, peak: number): void {
-  let m = 0;
-  for (let i = 0; i < buf.length; i++) m = Math.max(m, Math.abs(buf[i]));
+  const m = peakAbs(buf);
   if (m < 1e-6) return;
-  const g = peak / m;
+  applyGainSoftClip(buf, peak / m);
+}
+
+/** Multiply by `g` and soft clip, over [from, to). Split into ranges so long buffers can be time-sliced. */
+export function applyGainSoftClip(buf: Float32Array, g: number, from = 0, to = buf.length): void {
   const k = 1 / Math.tanh(1.1);
-  for (let i = 0; i < buf.length; i++) {
+  for (let i = from; i < to; i++) {
     // Cheap soft clip: tanh only where it matters.
     const x = buf[i] * g * 1.1;
     const x2 = x * x;
@@ -222,18 +251,53 @@ export function normalize(buf: Float32Array, peak: number): void {
 
 /** Render a whole SoundDef to PCM. Deterministic for a given seed. */
 export function renderSound(def: SoundDef, sr: number): Float32Array {
+  const job = createSoundJob(def, sr);
+  job.step(Infinity);
+  return job.result!;
+}
+
+const clockMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+
+/**
+ * Time-sliced renderSound: step(budgetMs) renders layer slices until the budget is spent and returns true
+ * when finished. The output is identical to renderSound.
+ */
+export function createSoundJob(def: SoundDef, sr: number, sliceSamples = 2048): { step(budgetMs: number): boolean; readonly result: Float32Array | null } {
   const out = new Float32Array(Math.max(1, Math.ceil(soundLength(def) * sr)));
   const rng = makeRng(def.seed ?? 1);
-  for (const l of def.layers) renderLayer(out, sr, l, rng);
-  if (def.echo) applyEcho(out, sr, def.echo);
-  // 3 ms fade in/out to avoid clicks.
-  const fade = Math.min(out.length >> 1, Math.round(0.003 * sr));
-  for (let i = 0; i < fade; i++) {
-    out[i] *= i / fade;
-    out[out.length - 1 - i] *= i / fade;
-  }
-  normalize(out, def.peak ?? 0.85);
-  return out;
+  let li = 0;
+  let run: ((max: number) => boolean) | null = null;
+  let done = false;
+  const finish = () => {
+    if (def.echo) applyEcho(out, sr, def.echo);
+    // 3 ms fade in/out to avoid clicks.
+    const fade = Math.min(out.length >> 1, Math.round(0.003 * sr));
+    for (let i = 0; i < fade; i++) {
+      out[i] *= i / fade;
+      out[out.length - 1 - i] *= i / fade;
+    }
+    normalize(out, def.peak ?? 0.85);
+    done = true;
+  };
+  return {
+    get result() {
+      return done ? out : null;
+    },
+    step(budgetMs) {
+      if (done) return true;
+      const start = clockMs();
+      while (li < def.layers.length) {
+        run ??= makeLayerRenderer(out, sr, def.layers[li], rng);
+        if (run(sliceSamples)) {
+          run = null;
+          li++;
+        }
+        if (clockMs() - start > budgetMs) return false;
+      }
+      finish();
+      return true;
+    },
+  };
 }
 
 /** Karplus-Strong plucked string (harp) added into `out`. */

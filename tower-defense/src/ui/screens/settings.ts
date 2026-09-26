@@ -1,4 +1,4 @@
-// Settings: master/music/sfx volume, mute, damage numbers. Persists via save.saveSettings.
+// Settings: master/music/sfx volume, mute, damage numbers, screen shake, new-enemy intros. Persists via save.saveSettings.
 import type { AudioSettings } from '../../core/interfaces';
 import { button, h } from '../dom';
 import type { Ui } from '../shared';
@@ -10,6 +10,8 @@ export class SettingsScreen {
   private sliders = new Map<VolKey, { input: HTMLInputElement; out: HTMLElement }>();
   private muted: HTMLInputElement;
   private dmg: HTMLInputElement;
+  private shake: HTMLInputElement;
+  private intros: HTMLInputElement;
 
   constructor(private ui: Ui) {
     const rows: HTMLElement[] = [];
@@ -45,8 +47,22 @@ export class SettingsScreen {
       ui.saveSettings();
       ui.sfx('click');
     });
-    rows.push(h('label.set-row', null, h('span.set-label', null, 'Mute all'), h('span.toggle-wrap', null, this.muted, h('span.toggle-knob'))));
-    rows.push(h('label.set-row', null, h('span.set-label', null, 'Damage numbers'), h('span.toggle-wrap', null, this.dmg, h('span.toggle-knob'))));
+    const toggle = (apply: (on: boolean) => void): HTMLInputElement => {
+      const input = h('input.toggle', { type: 'checkbox', role: 'switch' });
+      input.addEventListener('change', () => {
+        apply(input.checked);
+        ui.saveSettings();
+        ui.sfx('click');
+      });
+      return input;
+    };
+    this.shake = toggle((on) => (ui.state.settings.screenShake = on));
+    this.intros = toggle((on) => (ui.state.settings.enemyIntros = on));
+    const row = (label: string, input: HTMLInputElement) => h('label.set-row', null, h('span.set-label', null, label), h('span.toggle-wrap', null, input, h('span.toggle-knob')));
+    rows.push(row('Mute all', this.muted));
+    rows.push(row('Damage numbers', this.dmg));
+    rows.push(row('Screen shake', this.shake));
+    rows.push(row('New-enemy intros', this.intros));
 
     this.el = h(
       'div.screen.modal-screen.settings-screen.is-hidden',
@@ -72,6 +88,8 @@ export class SettingsScreen {
     }
     this.muted.checked = a.muted;
     this.dmg.checked = this.ui.state.settings.showDamageNumbers;
+    this.shake.checked = this.ui.state.settings.screenShake;
+    this.intros.checked = this.ui.state.settings.enemyIntros;
   }
 
   private applyAudio(patch: Partial<AudioSettings>): void {

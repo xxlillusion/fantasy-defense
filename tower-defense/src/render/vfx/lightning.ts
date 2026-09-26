@@ -9,6 +9,8 @@ interface Bolt {
   life: number;
   maxLife: number;
   rejitter: number;
+  /** Width multiplier (Overload = thick). */
+  width: number;
 }
 
 const MAX_SEGMENTS = 600;
@@ -56,10 +58,10 @@ export class LightningLayer {
     this.mesh.renderOrder = 14;
   }
 
-  spawn(points: THREE.Vector3[], life = 0.16): void {
+  spawn(points: THREE.Vector3[], life = 0.16, width = 1): void {
     if (points.length < 2) return;
     if (this.bolts.length >= MAX_BOLTS) this.bolts.shift();
-    const b: Bolt = { pts: points, path: [], life, maxLife: life, rejitter: 0 };
+    const b: Bolt = { pts: points, path: [], life, maxLife: life, rejitter: 0, width };
     jitter(b);
     this.bolts.push(b);
   }
@@ -86,7 +88,7 @@ export class LightningLayer {
       // flicker: random brightness dips
       const bright = k * (Math.random() < 0.25 ? 0.4 : 1);
       for (let i = 0; i < b.path.length - 1 && segs < MAX_SEGMENTS; i++) {
-        this.writeSegment(segs++, b.path[i]!, b.path[i + 1]!, bright, camera);
+        this.writeSegment(segs++, b.path[i]!, b.path[i + 1]!, bright, camera, b.width);
       }
     }
     (this.geo.attributes.position as THREE.BufferAttribute).needsUpdate = true;
@@ -94,13 +96,13 @@ export class LightningLayer {
     this.geo.setDrawRange(0, segs * 12);
   }
 
-  private writeSegment(s: number, a: THREE.Vector3, b: THREE.Vector3, bright: number, camera: THREE.Camera): void {
+  private writeSegment(s: number, a: THREE.Vector3, b: THREE.Vector3, bright: number, camera: THREE.Camera, width: number): void {
     this.seg.subVectors(b, a);
     this.toCam.subVectors(camera.position, a).normalize();
     this.side.crossVectors(this.seg, this.toCam).normalize();
     const quads: [number, THREE.Color, number][] = [
-      [0.11, GLOW, 0.55 * bright],
-      [0.035, CORE, 1.0 * bright],
+      [0.11 * width, GLOW, 0.55 * bright],
+      [0.035 * width, CORE, 1.0 * bright],
     ];
     quads.forEach(([w, c, k], q) => {
       const v = (s * 2 + q) * 4;

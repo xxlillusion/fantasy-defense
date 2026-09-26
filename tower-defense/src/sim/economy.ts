@@ -1,5 +1,5 @@
 // Gold, lives and scoring rules. All numbers come from src/data.
-// Stream A2 owns this file (v2: interest).
+// Stream A2 owns this file (v2: interest, endless HP growth).
 import type { Difficulty, EnemyKind, Stars, TowerBranch, TowerKind, TowerLevel } from '../core/types';
 import { DIFFICULTIES, ENEMIES, nextUpgradeCost, RULES, TOWERS } from '../data';
 import type { SimState } from './state';
@@ -27,10 +27,23 @@ export function earlySendBonus(remaining: number | null): number {
   return Math.floor(remaining) * RULES.earlySendGoldPerSecond;
 }
 
-/** Enemy max HP for a wave (1-based) and difficulty. TODO(A2): endless growth past the campaign. */
-export function enemyMaxHp(kind: EnemyKind, wave: number, difficulty: Difficulty): number {
+/**
+ * Enemy max HP for a wave (1-based) and difficulty: base * hpGrowthPerWave^(wave-1).
+ * Past the campaign (endless, wave > campaignWaves) growth switches to endlessHpGrowth:
+ * base * hpGrowthPerWave^(campaign-1) * endlessHpGrowth^(wave-campaign).
+ */
+export function enemyMaxHp(kind: EnemyKind, wave: number, difficulty: Difficulty, campaignWaves = Infinity): number {
   const w = Math.max(1, wave);
-  return Math.round(ENEMIES[kind].hp * Math.pow(RULES.hpGrowthPerWave, w - 1) * DIFFICULTIES[difficulty].hpMultiplier);
+  const growth =
+    w > campaignWaves
+      ? Math.pow(RULES.hpGrowthPerWave, campaignWaves - 1) * Math.pow(RULES.endlessHpGrowth, w - campaignWaves)
+      : Math.pow(RULES.hpGrowthPerWave, w - 1);
+  return Math.round(ENEMIES[kind].hp * growth * DIFFICULTIES[difficulty].hpMultiplier);
+}
+
+/** Interest at a wave clear: min(floor(gold * rate), cap). The caller zeroes it for austerity. */
+export function interestOn(gold: number): number {
+  return Math.max(0, Math.min(Math.floor(gold * RULES.interestRate), RULES.interestCap));
 }
 
 /** Victory stars: 3 = no lives lost, 2 = lives >= fraction of max, else 1. 0 if dead. */

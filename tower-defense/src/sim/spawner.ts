@@ -1,12 +1,18 @@
 // Wave spawn schedule and enemy creation.
-// Stream A2 owns this file (v2: lanes, horde modifier, ironclad armor).
+// Stream A2 owns this file (v2: lanes, ironclad armor, endless HP). Horde is applied to the WaveDef
+// itself (flow.waveDef -> modifiers.applyWaveModifiers) so the next-wave preview matches the spawns.
 import type { EnemyKind } from '../core/types';
-import { ENEMIES, pointAlongPath, type WaveDef } from '../data';
+import { ENEMIES, mapWaves, pointAlongPath, type WaveDef } from '../data';
 import { enemyMaxHp } from './economy';
+import { bonusArmor } from './modifiers';
 import { toEnemySnapshot } from './snapshot';
 import { allocId, EPS, type EnemyState, type SimContext, type SimState, type SpawnEntry } from './state';
 
-/** Flatten a wave definition into a time-sorted spawn list (stable for equal times), assigning lanes. */
+/**
+ * Flatten a wave definition into a time-sorted spawn list (stable for equal times), assigning lanes:
+ * a numeric lane pins the group (clamped to the map); 'alternate' / undefined round-robins every spawn
+ * across all lanes using state.laneCursor (which carries over between groups and waves).
+ */
 export function buildSpawnQueue(state: SimState, wave: WaveDef): SpawnEntry[] {
   const lanes = state.map.paths.length;
   const out: SpawnEntry[] = [];
@@ -32,7 +38,7 @@ export function spawnEnemy(ctx: SimContext, kind: EnemyKind, opts: SpawnOpts = {
   const def = ENEMIES[kind];
   const lane = Math.min(state.map.paths.length - 1, Math.max(0, opts.lane ?? 0));
   const progress = opts.progress ?? 0;
-  const hp = enemyMaxHp(kind, state.wave, state.difficulty);
+  const hp = enemyMaxHp(kind, state.wave, state.difficulty, mapWaves(state.map).length);
   const p = pointAlongPath(state.map, progress, lane);
   const stealth = !!def.traits?.stealth;
   const enemy: EnemyState = {
@@ -41,7 +47,7 @@ export function spawnEnemy(ctx: SimContext, kind: EnemyKind, opts: SpawnOpts = {
     def,
     hp,
     maxHp: hp,
-    armor: def.armor, // TODO(A2): + ironclad modifier
+    armor: def.armor + bonusArmor(state),
     lane,
     progress,
     remaining: state.pathLengths[lane]! - progress,
