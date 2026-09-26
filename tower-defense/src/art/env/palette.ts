@@ -1,0 +1,46 @@
+// Cool, desaturated environment palette (sRGB hex). Characters (Stream C) are warm; keep this cool.
+
+export const PAL = {
+  // ground
+  grassBase: '#58796a',
+  grassDark: '#3e5a50',
+  grassDeep: '#324a44',
+  grassMid: '#66876f',
+  grassLight: '#7e9e88',
+  grassTip: '#8eab98',
+  moss: '#5b7a5c',
+  flowerA: '#c9dde6',
+  flowerB: '#9fb9d6',
+  // plaza stone
+  stoneLight: '#a3aeb2',
+  stone: '#8a9599',
+  stoneDark: '#67737a',
+  seam: '#2b3836',
+  // world
+  statue: 0x93a2b0,
+  statueMoss: 0x55705f,
+  cliff: 0x7d8c93,
+  cliffDark: 0x56656c,
+  cliffMoss: 0x4a6552,
+  forestA: 0x2f5049,
+  forestB: 0x3b5d55,
+  forestC: 0x26433e,
+  trunk: 0x3d3a38,
+  leafA: 0x3f6456,
+  leafB: 0x4f7563,
+  leafC: 0x365548,
+  rock: 0x6f7a80,
+  rockDark: 0x4d575d,
+  // atmosphere
+  fog: 0x8aa9b0,
+  sky: 0x9db8bf,
+  hemiSky: 0xcfe3ea,
+  hemiGround: 0x2b3d38,
+  sun: 0xe8f1f2,
+  water: 0x2c6570,
+  waterDeep: 0x173c45,
+  foam: 0xdaf4ff,
+  portal: 0x5fe6ff,
+  portalCore: 0xc8fbff,
+  dust: 0xd6f2ff,
+} as const;
