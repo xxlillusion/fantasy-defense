@@ -1,6 +1,7 @@
 import { EventBus, type GameEventName, type GameEvents } from '../../src/core/events';
 import { SIM_DT } from '../../src/core/grid';
-import type { Difficulty, EnemyKind, TileCoord, TowerKind, TowerLevel } from '../../src/core/types';
+import type { Difficulty, EnemyKind, GameMode, ModifierId, TileCoord, TowerBranch, TowerKind, TowerLevel } from '../../src/core/types';
+import { DEFAULT_MAP_ID } from '../../src/data';
 import type { EnemyState, TowerState } from '../../src/sim/state';
 import { createSeededRng, createSimulationWithOptions, type Rng, type SimulationHandle } from '../../src/sim';
 
@@ -47,12 +48,14 @@ export interface Harness {
   log: EventLog;
 }
 
-export function makeSim(opts: { difficulty?: Difficulty; rng?: Rng; start?: boolean; gold?: number } = {}): Harness {
+export function makeSim(
+  opts: { difficulty?: Difficulty; rng?: Rng; start?: boolean; gold?: number; mapId?: string; mode?: GameMode; modifiers?: ModifierId[] } = {},
+): Harness {
   const events = new EventBus();
   const log = new EventLog(events);
   const sim = createSimulationWithOptions(events, { rng: opts.rng ?? createSeededRng(1234) });
   if (opts.start !== false) {
-    sim.startGame(opts.difficulty ?? 'normal');
+    sim.startGame({ difficulty: opts.difficulty ?? 'normal', mapId: opts.mapId ?? DEFAULT_MAP_ID, mode: opts.mode ?? 'campaign', modifiers: opts.modifiers ?? [] });
     if (opts.gold !== undefined) sim.state.gold = opts.gold;
   }
   log.clear();
@@ -68,14 +71,20 @@ export function seconds(s: number): number {
 }
 
 /** Place a tower (with unlimited gold) and upgrade it to `level`. */
-export function addTower(sim: SimulationHandle, kind: TowerKind, tile: TileCoord, level: TowerLevel = 1): TowerState {
+export function addTower(
+  sim: SimulationHandle,
+  kind: TowerKind,
+  tile: TileCoord,
+  level: TowerLevel = 1,
+  branch: TowerBranch = 'a',
+): TowerState {
   const gold = sim.state.gold;
   sim.state.gold = 1e9;
   const r = sim.placeTower(kind, tile);
   if (!r.ok) throw new Error(`placeTower failed: ${r.reason}`);
   const t = sim.state.towers[sim.state.towers.length - 1]!;
   while (t.level < level) {
-    const u = sim.upgradeTower(t.id);
+    const u = sim.upgradeTower(t.id, t.level === 3 ? branch : undefined);
     if (!u.ok) throw new Error(`upgrade failed: ${u.reason}`);
   }
   sim.state.gold = gold;

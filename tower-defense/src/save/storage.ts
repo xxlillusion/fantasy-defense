@@ -49,6 +49,8 @@ export function sanitizeSettings(raw: unknown): UserSettings {
   return {
     audio: sanitizeAudio(r.audio),
     showDamageNumbers: typeof r.showDamageNumbers === 'boolean' ? r.showDamageNumbers : DEFAULT_USER_SETTINGS.showDamageNumbers,
+    screenShake: typeof r.screenShake === 'boolean' ? r.screenShake : DEFAULT_USER_SETTINGS.screenShake,
+    enemyIntros: typeof r.enemyIntros === 'boolean' ? r.enemyIntros : DEFAULT_USER_SETTINGS.enemyIntros,
   };
 }
 
@@ -94,6 +96,9 @@ export function createSaveStoreWithStorage(storage: KeyValueStorage | null): ISa
     data = emptyData();
   }
 
+  const runs = new Map<string, { score: number; wave: number }>();
+  const seen = new Set<string>();
+
   const persist = () => {
     if (!backend) return;
     try {
@@ -116,6 +121,34 @@ export function createSaveStoreWithStorage(storage: KeyValueStorage | null): ISa
       data.best[key] = s;
       persist();
       return true;
+    },
+    // TODO(E): v2 save format (runs per mode, enemies seen) with v1 migration. In-memory placeholders:
+    getBest(mapId, difficulty, mode) {
+      const r = runs.get(`${mapId}:${difficulty}:${mode}`);
+      const stars = mode === 'campaign' ? (data.best[keyOf(mapId, difficulty)] ?? 0) : 0;
+      return { stars, score: r?.score ?? 0, wave: r?.wave ?? 0 };
+    },
+    recordRun(mapId, difficulty, mode, run) {
+      const key = `${mapId}:${difficulty}:${mode}`;
+      const prev = runs.get(key) ?? { score: 0, wave: 0 };
+      const improved = { stars: false, score: run.score > prev.score, wave: run.wave > prev.wave };
+      runs.set(key, { score: Math.max(prev.score, run.score), wave: Math.max(prev.wave, run.wave) });
+      if (mode === 'campaign') {
+        const s = toStars(run.stars);
+        const bk = keyOf(mapId, difficulty);
+        if (s !== null && s > (data.best[bk] ?? 0)) {
+          data.best[bk] = s;
+          improved.stars = true;
+          persist();
+        }
+      }
+      return improved;
+    },
+    hasSeenEnemy(kind) {
+      return seen.has(kind);
+    },
+    markEnemySeen(kind) {
+      seen.add(kind);
     },
     getSettings() {
       return sanitizeSettings(data.settings);

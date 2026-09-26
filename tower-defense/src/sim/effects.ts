@@ -3,7 +3,7 @@ import type { Vec2 } from '../core/types';
 import type { TowerLevelStats } from '../data';
 import { damageEnemy } from './damage';
 import { enemiesInRange } from './targeting';
-import { allocId, EPS, type EnemyState, type SimContext } from './state';
+import { allocId, EPS, type DamageSource, type EnemyState, type SimContext } from './state';
 
 /** Burning ground deals its damage in discrete ticks this often (seconds). */
 export const BURN_TICK_INTERVAL = 0.5;
@@ -64,7 +64,12 @@ export function tickStatuses(ctx: SimContext, dt: number): void {
   }
 }
 
-export function spawnBurn(ctx: SimContext, pos: Vec2, burn: NonNullable<TowerLevelStats['burn']>): void {
+export function spawnBurn(
+  ctx: SimContext,
+  pos: Vec2,
+  burn: NonNullable<TowerLevelStats['burn']>,
+  source: DamageSource = { type: 'burn' },
+): void {
   ctx.state.groundEffects.push({
     id: allocId(ctx.state),
     kind: 'burn',
@@ -73,6 +78,7 @@ export function spawnBurn(ctx: SimContext, pos: Vec2, burn: NonNullable<TowerLev
     remaining: burn.duration,
     dps: burn.dps,
     tickTimer: 0,
+    source,
   });
 }
 
@@ -86,15 +92,16 @@ export function updateGroundEffects(ctx: SimContext, dt: number): void {
   if (!state.groundEffects.length) return;
 
   for (const g of state.groundEffects) {
+    if (g.kind !== 'burn') continue; // meteorWarning is ticked by abilities.ts (A2)
     const inside = enemiesInRange(state.enemies, GROUND_ONLY, g.pos, g.radius);
     for (const e of inside) e.burning = true;
     g.tickTimer += dt;
     if (g.tickTimer >= BURN_TICK_INTERVAL - EPS) {
       g.tickTimer -= BURN_TICK_INTERVAL;
       const amount = g.dps * BURN_TICK_INTERVAL;
-      for (const e of inside) damageEnemy(ctx, e, amount, { armorPierce: true, crit: false });
+      for (const e of inside) damageEnemy(ctx, e, amount, { armorPierce: true, crit: false, source: g.source });
     }
     g.remaining -= dt;
   }
-  state.groundEffects = state.groundEffects.filter((g) => g.remaining > EPS);
+  state.groundEffects = state.groundEffects.filter((g) => g.kind !== 'burn' || g.remaining > EPS);
 }

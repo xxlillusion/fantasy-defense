@@ -15,18 +15,34 @@ export const RULES = {
   minDamage: 1,
   /** Victory stars: 3 = no lives lost, 2 = lives >= this fraction of max, else 1. */
   twoStarLifeFraction: 0.5,
+
+  // ---- v2
+  /** Interest at each wave clear: min(floor(gold * rate), cap). Disabled by the austerity modifier. */
+  interestRate: 0.05,
+  interestCap: 50,
+  /** Endless: HP growth per wave AFTER the campaign waves (replaces hpGrowthPerWave past wave 20). */
+  endlessHpGrowth: 1.09,
+  /** Endless generator point budget: base * growth^(wave - campaignWaves). */
+  endlessBudgetBase: 120,
+  endlessBudgetGrowth: 1.14,
+  /** Endless: boss every N waves. */
+  endlessBossEvery: 5,
+  /** Score = (bountyEarned + wavesCleared * perWave + livesLeft * perLife) * difficulty * modifiers. */
+  score: { perWave: 100, perLife: 50 },
+  /** Vulnerable and other multipliers apply after armor. */
 } as const;
 
 export interface DifficultyDef {
   id: Difficulty;
   name: string;
+  scoreMultiplier: number;
   hpMultiplier: number;
   startGold: number;
   lives: number;
 }
 
 export const DIFFICULTIES: Record<Difficulty, DifficultyDef> = {
-  easy: { id: 'easy', name: 'Easy', hpMultiplier: 0.8, startGold: 200, lives: 30 },
-  normal: { id: 'normal', name: 'Normal', hpMultiplier: 1.0, startGold: 150, lives: 20 },
-  hard: { id: 'hard', name: 'Hard', hpMultiplier: 1.2, startGold: 150, lives: 15 },
+  easy: { id: 'easy', name: 'Easy', scoreMultiplier: 0.75, hpMultiplier: 0.8, startGold: 200, lives: 30 },
+  normal: { id: 'normal', name: 'Normal', scoreMultiplier: 1, hpMultiplier: 1.0, startGold: 150, lives: 20 },
+  hard: { id: 'hard', name: 'Hard', scoreMultiplier: 1.5, hpMultiplier: 1.2, startGold: 150, lives: 15 },
 };

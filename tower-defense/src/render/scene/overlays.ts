@@ -124,6 +124,8 @@ export function buildOverlays(isBuildable: (t: TileCoord) => boolean, anisotropy
   return {
     group,
     setGhost(g) {
+      // TODO(B): rally and ability ghosts
+      if (g && g.type !== 'tower') g = null;
       ghostOn = !!g;
       tile.visible = range.mesh.visible = !!g;
       if (!g) return;

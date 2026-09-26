@@ -140,6 +140,12 @@ const ENEMY_COLORS: Record<EnemyKind, string> = {
   swarmling: '#e0506a',
   flyer: '#b066e0',
   boss: '#f0b030',
+  // TODO(D): proper icons for the v2 enemies
+  shaman: '#6fd0a0',
+  shieldbearer: '#a0a8b8',
+  broodmother: '#c070a0',
+  wraith: '#b8c8ff',
+  dragon: '#ff7050',
 };
 
 export function enemyIcon(kind: EnemyKind): string {
@@ -151,6 +157,11 @@ export function enemyIcon(kind: EnemyKind): string {
     swarmling: ['K......K', 'KK....KK', '.KGGGGK.', '.GWGGWG.', '.KGGGGK.', '..KGGK..'],
     flyer: ['K......K', 'GK....KG', 'GGKGGKGG', '.GGWWGG.', '..GGGG..', '...GG...'],
     boss: ['.Y.YY.Y.', '.YYYYYY.', 'KGGGGGGK', 'KGWGGWGK', 'KGGGGGGK', 'KGKKKKGK', '.KKKKKK.'],
+    shaman: ['..YYYY..', '.KGGGGK.', 'KGGGGGGK', 'KGWGGWGK', 'KGGGGGGK', '.KGKKGK.', '..KGGK..'],
+    shieldbearer: ['.KKKKKK.', 'KGGGGGGK', 'KGWGGWGK', 'KGGGGGGK', 'YYYGGGGK', 'YYYKKGGK', '.KKKKKK.'],
+    broodmother: ['K.K..K.K', '.KGGGGK.', 'KGWGGWGK', 'KGGGGGGK', 'KGGGGGGK', '.KGKKGK.', 'K......K'],
+    wraith: ['..KKKK..', '.KGGGGK.', 'KGWGGWGK', 'KGGGGGGK', '.KGGGGK.', '.KG.GK..', '..K..K..'],
+    dragon: ['Y......Y', 'GK....KG', 'GGKGGKGG', 'GGGWWGGG', '.GGGGGG.', '..GGGG..', '...GG...'],
   };
   return pixelSvg(grids[kind], { K: '#1a1420', G: c, W: '#ffef9a', Y: '#ffd35a' }, 'px-icon enemy-icon');
 }

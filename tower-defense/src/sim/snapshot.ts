@@ -1,22 +1,30 @@
 // Copies internal state into fresh, frozen GameSnapshot objects.
+// Lead-owned layout (v2); Stream A2 may extend it.
 import type {
+  AbilitySnapshot,
   EnemySnapshot,
   GameSnapshot,
   GroundEffectSnapshot,
+  HeroSnapshot,
   ProjectileSnapshot,
   TowerSnapshot,
   WaveGroupPreview,
 } from '../core/types';
-import { TOWERS, WAVES } from '../data';
+import { ABILITIES, ABILITY_IDS, branchOptions, HERO, HERO_MAX_LEVEL, mapWaves, towerStats } from '../data';
 import { earlySendBonus, sellValue, upgradeCost } from './economy';
 import { currentSlow, isStunned } from './effects';
-import type { EnemyState, GroundEffectState, ProjectileState, SimState, TowerState } from './state';
+import { waveDef } from './flow';
+import { computeScore } from './score';
+import type { EnemyState, GroundEffectState, HeroInternal, ProjectileState, SimState, TowerState } from './state';
 
 export function toTowerSnapshot(t: TowerState): TowerSnapshot {
+  const stats = towerStats(t.kind, t.level, t.branch);
+  const period = 1 / stats.fireRate;
   return Object.freeze({
     id: t.id,
     kind: t.kind,
     level: t.level,
+    branch: t.branch,
     tile: Object.freeze({ ...t.tile }),
     pos: Object.freeze({ ...t.pos }),
     targetMode: t.targetMode,
@@ -26,7 +34,9 @@ export function toTowerSnapshot(t: TowerState): TowerSnapshot {
     invested: t.invested,
     sellValue: sellValue(t.invested),
     upgradeCost: upgradeCost(t.kind, t.level),
-    range: TOWERS[t.kind].levels[t.level].range,
+    range: stats.range,
+    cooldownFraction: Math.min(1, Math.max(0, 1 - t.cooldown / period)),
+    branchOptions: t.level === 3 ? Object.freeze(branchOptions(t.kind)) : null,
   });
 }
 
@@ -37,13 +47,20 @@ export function toEnemySnapshot(e: EnemyState): EnemySnapshot {
     pos: Object.freeze({ ...e.pos }),
     hp: e.hp,
     maxHp: e.maxHp,
-    armor: e.def.armor,
+    armor: e.armor,
     flying: e.def.flying,
     slow: currentSlow(e),
     stunned: isStunned(e),
     burning: e.burning,
     progress: e.progress,
     heading: e.heading,
+    lane: e.lane,
+    remaining: e.remaining,
+    shield: e.shield,
+    stealthed: e.stealth,
+    revealed: e.revealed,
+    vulnerable: e.vulnerable !== null && e.vulnerable.remaining > 0,
+    blockedByHero: e.blockedByHero,
   });
 }
 
@@ -65,11 +82,61 @@ function toGroundEffectSnapshot(g: GroundEffectState): GroundEffectSnapshot {
   return Object.freeze({ id: g.id, kind: g.kind, pos: Object.freeze({ ...g.pos }), radius: g.radius, remaining: g.remaining });
 }
 
+function toHeroSnapshot(h: HeroInternal): HeroSnapshot {
+  const next = h.level < HERO_MAX_LEVEL ? HERO.levelXp[h.level]! : null;
+  return Object.freeze({
+    pos: Object.freeze({ ...h.pos }),
+    rally: Object.freeze({ ...h.rally }),
+    state: h.state,
+    hp: h.hp,
+    maxHp: h.maxHp,
+    level: h.level,
+    maxLevel: HERO_MAX_LEVEL,
+    xp: h.xp,
+    xpNext: next,
+    facing: h.facing,
+    lastAttackAt: h.lastAttackAt,
+    respawnIn: h.respawnIn,
+    blocking: Object.freeze([...h.blocking]),
+  });
+}
+
+function toAbilitySnapshots(state: SimState): readonly AbilitySnapshot[] {
+  return Object.freeze(
+    ABILITY_IDS.map((id) => {
+      const def = ABILITIES[id];
+      const a = state.abilities[id];
+      return Object.freeze({
+        id,
+        unlocked: state.phase !== 'title' && state.wave >= def.unlockWave,
+        unlockWave: def.unlockWave,
+        cooldown: Math.max(0, a.cooldown),
+        cooldownMax: def.cooldown,
+        activeRemaining: Math.max(0, a.active),
+        targeted: def.targeted,
+        radius: def.radius,
+      });
+    }),
+  );
+}
+
 function nextWavePreview(state: SimState): readonly WaveGroupPreview[] | null {
   if (state.phase !== 'build' && state.phase !== 'wave') return null;
-  const def = WAVES[state.wave];
+  const def = waveDef(state, state.wave + 1);
   if (!def) return null;
   return Object.freeze(def.map((g) => Object.freeze({ enemy: g.enemy, count: g.count })));
+}
+
+function nextWaveLanes(state: SimState): readonly number[] {
+  const lanes = state.map.paths.length;
+  const def = state.phase === 'build' || state.phase === 'wave' ? waveDef(state, state.wave + 1) : null;
+  if (!def) return Object.freeze([]);
+  const set = new Set<number>();
+  for (const g of def) {
+    if (typeof g.lane === 'number') set.add(Math.min(lanes - 1, Math.max(0, g.lane)));
+    else for (let l = 0; l < Math.min(lanes, g.count); l++) set.add(l);
+  }
+  return Object.freeze([...set].sort((a, b) => a - b));
 }
 
 export function buildSnapshot(state: SimState): GameSnapshot {
@@ -79,8 +146,12 @@ export function buildSnapshot(state: SimState): GameSnapshot {
     phase: state.phase,
     difficulty: state.difficulty,
     mapId: state.mapId,
+    mode: state.mode,
+    modifiers: Object.freeze([...state.modifiers]),
     wave: state.wave,
-    totalWaves: WAVES.length,
+    totalWaves: state.mode === 'endless' ? null : mapWaves(state.map).length,
+    score: computeScore(state),
+    lastInterest: state.lastInterest,
     gold: state.gold,
     lives: state.lives,
     maxLives: state.maxLives,
@@ -89,6 +160,9 @@ export function buildSnapshot(state: SimState): GameSnapshot {
     buildCountdown: inBuild ? state.buildCountdown : null,
     earlySendBonus: inBuild ? earlySendBonus(state.buildCountdown) : 0,
     nextWave: nextWavePreview(state),
+    nextWaveLanes: nextWaveLanes(state),
+    hero: state.hero ? toHeroSnapshot(state.hero) : null,
+    abilities: toAbilitySnapshots(state),
     towers: Object.freeze(state.towers.map(toTowerSnapshot)),
     enemies: Object.freeze(state.enemies.filter((e) => e.alive).map(toEnemySnapshot)),
     projectiles: Object.freeze(state.projectiles.map((p) => toProjectileSnapshot(p, state))),

@@ -1,6 +1,6 @@
 // Human-readable tower stats derived from src/data/towers.ts.
-import type { TowerKind, TowerLevel } from '../core/types';
-import { TOWERS } from '../data';
+import type { TowerBranch, TowerKind, TowerLevel } from '../core/types';
+import { TOWERS, towerStats } from '../data';
 
 export interface StatRow {
   label: string;
@@ -15,8 +15,8 @@ export function targetsLabel(kind: TowerKind): string {
   return d.hitsAir && d.hitsGround ? 'Air + Ground' : d.hitsAir ? 'Air only' : 'Ground only';
 }
 
-export function statRows(kind: TowerKind, level: TowerLevel): StatRow[] {
-  const s = TOWERS[kind].levels[level];
+export function statRows(kind: TowerKind, level: TowerLevel, branch: TowerBranch | null = null): StatRow[] {
+  const s = towerStats(kind, level, branch);
   const rows: StatRow[] = [
     { label: 'Damage', value: s.projectilesPerShot > 1 ? `${num(s.damage)} x${s.projectilesPerShot}` : num(s.damage) },
     { label: 'Rate', value: `${num(s.fireRate)}/s` },

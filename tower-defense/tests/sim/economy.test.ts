@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DIFFICULTIES, ENEMIES, RULES, TOWERS } from '../../src/data';
+import { DEFAULT_MAP_ID, DIFFICULTIES, ENEMIES, RULES, TOWERS } from '../../src/data';
 import { computeStars, enemyMaxHp, sellValue } from '../../src/sim/economy';
 import { addTower, makeSim, TOWER_TILE } from './helpers';
 
@@ -44,7 +44,7 @@ describe('placement validation', () => {
   it('only allows placement during build or wave phases', () => {
     const { sim } = makeSim({ start: false });
     expect(sim.canPlaceTower('arrow', TOWER_TILE).ok).toBe(false);
-    sim.startGame('normal');
+    sim.startGame({ difficulty: 'normal', mapId: DEFAULT_MAP_ID, mode: 'campaign', modifiers: [] });
     sim.sendWave();
     expect(sim.snapshot().phase).toBe('wave');
     expect(sim.canPlaceTower('arrow', TOWER_TILE).ok).toBe(true);
@@ -74,10 +74,13 @@ describe('upgrade / sell / target mode', () => {
     expect(sim.upgradeTower(id)).toEqual({ ok: false, reason: 'Not enough gold' });
     sim.state.gold = 1000;
     expect(sim.upgradeTower(id).ok).toBe(true);
-    expect(sim.upgradeTower(id)).toEqual({ ok: false, reason: 'Already at max level' });
+    expect(sim.upgradeTower(id)).toEqual({ ok: false, reason: 'Choose a specialization' });
+    expect(sim.upgradeTower(id, 'b').ok).toBe(true);
+    expect(sim.state.towers[0]!.branch).toBe('b');
+    expect(sim.upgradeTower(id, 'a')).toEqual({ ok: false, reason: 'Already at max level' });
     expect(sim.snapshot().towers[0]!.upgradeCost).toBeNull();
     expect(sim.upgradeTower(9999)).toEqual({ ok: false, reason: 'Tower not found' });
-    expect(log.of('commandRejected')).toHaveLength(3);
+    expect(log.of('commandRejected')).toHaveLength(4);
   });
 
   it('sells for floor(invested * sellRefund), including during a wave', () => {

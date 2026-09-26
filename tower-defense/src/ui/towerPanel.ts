@@ -1,6 +1,6 @@
 // Selected-tower panel: class + level stars, current stats, next-level blurb, Upgrade / Sell / targeting.
-import type { GameSnapshot, TargetMode, TowerLevel, TowerSnapshot } from '../core/types';
-import { TOWERS } from '../data';
+import type { GameSnapshot, TargetMode, TowerSnapshot } from '../core/types';
+import { TOWERS, type BaseLevel } from '../data';
 import { button, cls, h, setDisabled, TextSlot } from './dom';
 import { coinIcon, starSvg, towerIcon } from './icons';
 import type { Ui } from './shared';
@@ -113,7 +113,7 @@ export class TowerPanel {
       const sp = h('span', { html: starSvg(`star ${i <= t.level ? 'is-on' : ''}`) });
       stars.append(sp.firstElementChild!);
     }
-    const next = t.level < 3 ? d.levels[(t.level + 1) as TowerLevel] : null;
+    const next = t.level < 3 ? d.levels[(t.level + 1) as BaseLevel] : null; // TODO(D): L3 -> L4 branch choice
 
     this.upBtn = button(
       next ? [h('span', null, 'Upgrade'), h('span.cost', null, h('span.cost-icon', { html: coinIcon }), String(t.upgradeCost ?? next.cost))] : 'Max level',

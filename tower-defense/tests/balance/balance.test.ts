@@ -4,6 +4,7 @@ import { EventBus } from '../../src/core/events';
 import { SIM_DT } from '../../src/core/grid';
 import type { Difficulty, TowerKind } from '../../src/core/types';
 import { createSeededRng, createSimulationWithOptions } from '../../src/sim';
+import { DEFAULT_MAP_ID } from '../../src/data';
 
 type Plan = [TowerKind, number, number][];
 
@@ -19,7 +20,7 @@ const GOOD_PLAN: Plan = [
 function play(difficulty: Difficulty, plan: Plan, maxTowersPerWave = 4, seed = 7, trace?: string[]) {
   const events = new EventBus();
   const sim = createSimulationWithOptions(events, { rng: createSeededRng(seed) });
-  sim.startGame(difficulty);
+  sim.startGame({ difficulty, mapId: DEFAULT_MAP_ID, mode: 'campaign', modifiers: [] });
   let planIdx = 0;
   let lastWaveSpent = -1;
   for (let guard = 0; guard < 60 * 60 * 60; guard++) {

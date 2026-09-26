@@ -1,11 +1,28 @@
 // Game phase flow: sending waves, build countdown, wave clear, victory and defeat.
-import { RULES, WAVES } from '../data';
+// Stream A2 owns this file (v2: endless, interest, score in gameOver).
+import { mapWaves, RULES, type WaveDef } from '../data';
 import { computeStars, earlySendBonus, earnGold, waveClearBonus } from './economy';
+import { generateEndlessWave } from './endless';
+import { computeScore } from './score';
 import { buildSpawnQueue } from './spawner';
-import type { SimContext } from './state';
+import type { SimContext, SimState } from './state';
+
+/** Campaign length for the current map. */
+export function campaignWaves(state: SimState): number {
+  return mapWaves(state.map).length;
+}
+
+/** Wave definition for a 1-based wave number (endless waves past the campaign are generated). */
+export function waveDef(state: SimState, wave: number): WaveDef | null {
+  const list = mapWaves(state.map);
+  if (wave >= 1 && wave <= list.length) return list[wave - 1]!;
+  if (state.mode === 'endless' && wave > list.length) return generateEndlessWave(state, wave);
+  return null;
+}
 
 export function canSendWave(ctx: SimContext): boolean {
-  return ctx.state.phase === 'build' && ctx.state.wave < WAVES.length;
+  const { state } = ctx;
+  return state.phase === 'build' && waveDef(state, state.wave + 1) !== null;
 }
 
 /** Start the next wave. `early` = player-initiated during a running countdown. */
@@ -18,7 +35,7 @@ export function startNextWave(ctx: SimContext, playerSent: boolean): void {
   state.phase = 'wave';
   state.buildCountdown = null;
   state.waveTime = 0;
-  state.spawnQueue = buildSpawnQueue(WAVES[state.wave - 1]!);
+  state.spawnQueue = buildSpawnQueue(state, waveDef(state, state.wave)!);
   ctx.events.emit('waveStarted', { wave: state.wave, early, bonus });
 }
 
@@ -41,9 +58,14 @@ export function checkDefeat(ctx: SimContext): boolean {
     state.phase = 'defeat';
     state.stars = 0;
     state.buildCountdown = null;
-    ctx.events.emit('gameOver', { result: 'defeat', stars: 0 });
+    ctx.events.emit('gameOver', { result: 'defeat', stars: 0, score: computeScore(state), mode: state.mode, wave: state.wave });
   }
   return true;
+}
+
+/** TODO(A2): min(floor(gold * RULES.interestRate), RULES.interestCap); 0 with the austerity modifier. */
+export function interestFor(_state: SimState): number {
+  return 0;
 }
 
 /** Wave phase: when nothing is left to spawn and nothing is alive, the wave is cleared. */
@@ -54,13 +76,17 @@ export function checkWaveCleared(ctx: SimContext): void {
 
   const bonus = waveClearBonus(state.wave);
   earnGold(state, bonus);
-  ctx.events.emit('waveCleared', { wave: state.wave, bonus });
+  const interest = interestFor(state);
+  earnGold(state, interest);
+  state.lastInterest = interest;
+  state.wavesCleared = state.wave;
+  ctx.events.emit('waveCleared', { wave: state.wave, bonus, interest });
 
-  if (state.wave >= WAVES.length) {
+  if (state.mode === 'campaign' && state.wave >= campaignWaves(state)) {
     state.phase = 'victory';
     state.stars = computeStars(state.lives, state.maxLives);
     state.buildCountdown = null;
-    ctx.events.emit('gameOver', { result: 'victory', stars: state.stars });
+    ctx.events.emit('gameOver', { result: 'victory', stars: state.stars, score: computeScore(state), mode: state.mode, wave: state.wave });
   } else {
     state.phase = 'build';
     state.buildCountdown = RULES.buildCountdown;

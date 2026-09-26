@@ -1,37 +1,43 @@
-# Waterfall Shrine: Team Rules
+# Waterfall Shrine: Team Rules (v2)
 
-The full design spec (gameplay, towers, enemies, waves, art direction) is in `DESIGN.md`.
+The design spec is `DESIGN.md`: v1 at the top, then **"v2: Gameplay Depth, Content, Feel & Polish"**.
 
 ## Ownership (parallel streams)
-| Stream | Owns (only edit these) | Entry point to replace |
+| Stream | Owns (only edit these) | Entry point |
 |---|---|---|
-| Lead | `src/core/`, `src/data/`, `src/stubs/`, `src/render/Renderer.ts`, `src/main.ts`, `tests/data/`, config files | — |
-| A Simulation | `src/sim/`, `tests/sim/` | `src/sim/index.ts` → `createSimulation` |
-| B Environment + Post-FX | `src/render/scene/`, `src/render/postfx/`, `src/art/env/` | `src/render/scene/index.ts` → `createEnvironment` |
-| C Sprites + VFX | `src/render/entities/`, `src/render/vfx/`, `src/art/sprites/` | `src/render/entities/index.ts` → `createEntities` |
-| D UI + Screens | `src/ui/`, `src/styles/` | `src/ui/index.ts` → `createUi` |
-| E Audio + Save | `src/audio/`, `src/save/`, `tests/save/` | `src/audio/index.ts`, `src/save/index.ts` |
+| Lead | `src/core/`, `src/data/`, `src/stubs/`, `src/render/Renderer.ts`, `src/main.ts`, `src/sim/state.ts`, `src/sim/snapshot.ts`, `src/sim/index.ts`, `tests/data/`, `tests/balance/`, `tests/sim/helpers.ts`, config files | — |
+| A1 Sim: combat & enemy traits | `src/sim/towers.ts`, `targeting.ts`, `damage.ts`, `projectiles.ts`, `effects.ts`, `traits.ts`, `tests/sim/combat*.test.ts`, `tests/sim/effects*.test.ts`, `tests/sim/traits*.test.ts` | (behind `createSimulation`) |
+| A2 Sim: flow, hero, meta | `src/sim/simulation.ts`, `flow.ts`, `spawner.ts`, `movement.ts`, `economy.ts`, `hero.ts`, `abilities.ts`, `endless.ts`, `modifiers.ts`, `score.ts`, `rng.ts`, `tests/sim/flow*.test.ts`, `tests/sim/economy*.test.ts`, `tests/sim/hero*.test.ts`, `tests/sim/abilities*.test.ts`, `tests/sim/endless*.test.ts`, `tests/sim/smoke*.test.ts` | `createSimulation` |
+| B Environment | `src/render/scene/`, `src/render/postfx/`, `src/art/env/` | `createEnvironment` |
+| C Sprites + VFX | `src/render/entities/`, `src/render/vfx/`, `src/art/sprites/` | `createEntities` |
+| D UI | `src/ui/`, `src/styles/` | `createUi` |
+| E Audio + Save | `src/audio/`, `src/save/`, `tests/save/` | `createAudio`, `createSaveStore` |
 
-- **Never edit files outside your stream.** `src/core/` contracts are frozen. If you need a change,
-  put it in your final report under "Contract change requests" and work around it for now.
-- **No new dependencies.** Everything is already installed: `three`, `postprocessing`, `howler`, `vitest`.
-- Import game data from `src/data` and the contracts from `src/core`. Don't duplicate constants.
+- **Never edit files outside your stream.** `src/core/`, `src/data/`, `sim/state.ts` and `sim/snapshot.ts` are frozen.
+  If you need a change, put it in your final report under "Contract change requests" and work around it for now.
+- **A1 and A2 share `src/sim/`.** Don't edit each other's files. Use the functions each side exports. The
+  `step()` pipeline order in `simulation.ts` is part of the contract. The `ctx.hooks.onEnemyKilled` hook
+  connects `killEnemy` (A1) to hero XP (A2).
+- **No new dependencies.**
+- Import game data from `src/data` (including `towerStats(kind, level, branch)`, the only way to read tower
+  stats) and the contracts from `src/core`. Don't duplicate constants.
 - Don't import from another stream's directory. Streams talk only through `src/core` interfaces, the
   `EventBus`, and `GameSnapshot`.
 
 ## Checks before reporting done
-- `npm run typecheck`: **your files** must have zero errors. Errors in other streams' directories
-  are not yours; ignore them (other agents are mid-edit).
-- `npm test`: your tests pass (A and E especially).
-- Optional visual check: a dev server already runs at http://localhost:5173 (Vite HMR picks up your
-  edits). Open **your own new browser tab** and don't touch other tabs. Use `?stub=` to isolate yourself from other streams'
-  in-progress work, e.g. `http://localhost:5173/?stub=sim,ui` uses the lead's stub sim and UI.
+- `npm run typecheck`: **your files** must have zero errors. Errors in other streams' directories are not yours.
+- `npm test`: your tests pass. It's fast; the slow balance harness is `npm run balance`, which the lead owns.
+- Optional visual check: a dev server already runs at http://localhost:5173 (HMR). Open **your own new
+  browser tab** and don't touch other tabs. Use `?stub=` to isolate yourself from other streams' in-progress work.
   Names: `sim, env, entities, ui, audio, save`. `window.__td` exposes `{ sim, events, renderer, getSnapshot }`.
-  In the console you can call `__td.sim.startGame('normal'); __td.sim.placeTower('arrow',{col:4,row:9}); __td.sim.sendWave()`.
-  Note: requestAnimationFrame stops while the pane is hidden, and taking a screenshot advances it.
+  Example: `__td.sim.startGame({difficulty:'normal', mapId:'ember-forge', mode:'campaign', modifiers:[]})`.
+  Maps: `waterfall-shrine`, `ember-forge`, `moonlit-ruins`.
+  requestAnimationFrame stops while the pane is hidden; a screenshot advances it. You can also call
+  `__td.sim.step(1/60)` in a loop to advance game time.
 
 ## Conventions
-- TypeScript strict, ES modules, no default exports. Match the style of `src/core`.
-- Game time comes from `snapshot.time`, which respects pause and 2× speed. Use real `dtReal` only for
-  ambient effects (waterfall, fog, dust) that should keep animating while paused.
+- TypeScript strict, ES modules, no default exports. Match the surrounding style.
+- Game time comes from `snapshot.time` (it respects pause and 2× speed). Use real `dtReal` only for
+  ambient effects.
 - Coordinates: gameplay `Vec2` is in tile units; convert with `toWorld()` / `fromWorld()` from `src/core/grid.ts`.
+  Compare enemies across lanes by `remaining`, not `progress`.

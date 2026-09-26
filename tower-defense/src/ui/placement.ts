@@ -92,7 +92,7 @@ export class Placement {
     if (key === this.ghostKey) return;
     this.ghostKey = key;
     const valid = this.query(() => this.ui.ctx.commands.canPlaceTower(kind, t)).ok;
-    this.ui.ctx.view.setPlacementGhost({ kind, tile: t, valid, range: TOWERS[kind].levels[1].range });
+    this.ui.ctx.view.setPlacementGhost({ type: 'tower', kind, tile: t, valid, range: TOWERS[kind].levels[1].range });
   }
 
   private onClick(e: MouseEvent): void {

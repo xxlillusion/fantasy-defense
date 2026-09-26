@@ -21,6 +21,7 @@ export function createStubAudio(): IAudio {
 
 export function createStubSaveStore(): ISaveStore {
   const best = new Map<string, Stars>();
+  const seen = new Set<string>();
   let settings: UserSettings = structuredClone(DEFAULT_USER_SETTINGS);
   return {
     getBestStars: (mapId: string, d: Difficulty) => best.get(`${mapId}:${d}`) ?? 0,
@@ -30,6 +31,14 @@ export function createStubSaveStore(): ISaveStore {
       best.set(key, stars);
       return true;
     },
+    getBest: (mapId, d, mode) => ({ stars: mode === 'campaign' ? (best.get(`${mapId}:${d}`) ?? 0) : 0, score: 0, wave: 0 }),
+    recordRun(mapId, d, mode, run) {
+      const stars = mode === 'campaign' && run.stars > (best.get(`${mapId}:${d}`) ?? 0);
+      if (stars) best.set(`${mapId}:${d}`, run.stars);
+      return { stars, score: false, wave: false };
+    },
+    hasSeenEnemy: (kind) => seen.has(kind),
+    markEnemySeen: (kind) => void seen.add(kind),
     getSettings: () => structuredClone(settings),
     saveSettings(s) {
       settings = structuredClone(s);

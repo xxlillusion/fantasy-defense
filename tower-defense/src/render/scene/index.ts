@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { fromWorld, GRID_ROWS, inBounds, tileAt } from '../../core/grid';
 import type { CreateEnvironment, IEnvironment, PlacementGhost, RendererHost, Selection } from '../../core/interfaces';
-import type { GameSnapshot, TileCoord } from '../../core/types';
+import type { GameSnapshot, TileCoord, Vec2 } from '../../core/types';
 import { DEFAULT_MAP_ID, getMap, isBuildable, type MapDef } from '../../data';
 import { createPostFx, POSTFX, type PostFx } from '../postfx/composer';
 import { applyFog, buildAtmosphere, type Atmosphere } from './atmosphere';
@@ -45,7 +45,8 @@ export const createEnvironment: CreateEnvironment = (): IEnvironment => {
   }
 
   return {
-    init(h) {
+    init(h, _events) {
+      // TODO(B): use events for shake / portal reactions; rebuild on map change
       host = h;
       map = getMap(DEFAULT_MAP_ID);
       const { renderer, scene, camera, layers } = h;
@@ -126,6 +127,24 @@ export const createEnvironment: CreateEnvironment = (): IEnvironment => {
       if (!raycaster.ray.intersectPlane(groundPlane, hit)) return null;
       const t = tileAt(fromWorld(hit.x, hit.z));
       return inBounds(t) ? t : null;
+    },
+
+    pickPoint(clientX: number, clientY: number): Vec2 | null {
+      if (!host) return null;
+      const rect = host.renderer.domElement.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return null;
+      ndc.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+      raycaster.setFromCamera(ndc, host.camera);
+      if (!raycaster.ray.intersectPlane(groundPlane, hit)) return null;
+      return fromWorld(hit.x, hit.z);
+    },
+
+    setMapPreview(_mapId: string | null) {
+      // TODO(B): rebuild the scene for the previewed map
+    },
+
+    setTitleMode(_on: boolean) {
+      // TODO(B): title camera pose + blend
     },
 
     setPlacementGhost(ghost: PlacementGhost | null) {

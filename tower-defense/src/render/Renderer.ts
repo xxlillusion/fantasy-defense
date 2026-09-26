@@ -32,7 +32,7 @@ export class Renderer implements IRendererView {
     }
     this.host = { renderer, scene, camera, layers };
 
-    env.init(this.host);
+    env.init(this.host, events);
     entities.init(this.host, events);
     this.resize();
     window.addEventListener('resize', () => this.resize());
@@ -56,6 +56,18 @@ export class Renderer implements IRendererView {
 
   pickTile(clientX: number, clientY: number): TileCoord | null {
     return this.env.pickTile(clientX, clientY);
+  }
+
+  pickPoint(clientX: number, clientY: number): Vec2 | null {
+    return this.env.pickPoint(clientX, clientY);
+  }
+
+  setMapPreview(mapId: string | null): void {
+    this.env.setMapPreview(mapId);
+  }
+
+  setTitleMode(on: boolean): void {
+    this.env.setTitleMode(on);
   }
 
   setPlacementGhost(ghost: PlacementGhost | null): void {

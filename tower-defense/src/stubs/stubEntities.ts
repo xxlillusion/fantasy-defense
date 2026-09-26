@@ -6,7 +6,19 @@ import type { EnemyKind, EntityId, GameSnapshot, TowerKind } from '../core/types
 import { ENEMIES, FLYER_HEIGHT } from '../data';
 
 const TOWER_COLORS: Record<TowerKind, number> = { arrow: 0xc070ff, cannon: 0xe04030, frost: 0x60a0ff, sniper: 0x503070, tesla: 0x80ffff };
-const ENEMY_COLORS: Record<EnemyKind, number> = { grunt: 0x6a8f2a, runner: 0xa06030, brute: 0x807060, swarmling: 0xd04060, flyer: 0x8040a0, boss: 0x909090 };
+const ENEMY_COLORS: Record<EnemyKind, number> = {
+  grunt: 0x6a8f2a,
+  runner: 0xa06030,
+  brute: 0x807060,
+  swarmling: 0xd04060,
+  flyer: 0x8040a0,
+  boss: 0x909090,
+  shaman: 0x40c090,
+  shieldbearer: 0xa0a0b0,
+  broodmother: 0xa04080,
+  wraith: 0xc0d0ff,
+  dragon: 0xe05020,
+};
 
 export function createStubEntities(): IEntities {
   let host: RendererHost;

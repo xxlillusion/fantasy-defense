@@ -21,18 +21,22 @@ const LAYOUT = [
 export const WATERFALL_SHRINE: MapDef = {
   id: 'waterfall-shrine',
   name: 'Waterfall Shrine',
+  description: 'A misty forest shrine. One winding path with generous chokepoints.',
+  theme: 'shrine',
   layout: LAYOUT,
   // Tile-unit points. Enemies spawn just off the left edge and walk to the portal.
-  waypoints: [
-    { x: -0.5, y: 10.5 },
-    { x: 5.5, y: 10.5 },
-    { x: 5.5, y: 6.5 },
-    { x: 14.5, y: 6.5 },
-    { x: 14.5, y: 9.5 },
-    { x: 17.5, y: 9.5 },
-    { x: 17.5, y: 3.5 },
-    { x: 10.5, y: 3.5 },
-    { x: 10.5, y: 0.5 },
+  paths: [
+    [
+      { x: -0.5, y: 10.5 },
+      { x: 5.5, y: 10.5 },
+      { x: 5.5, y: 6.5 },
+      { x: 14.5, y: 6.5 },
+      { x: 14.5, y: 9.5 },
+      { x: 17.5, y: 9.5 },
+      { x: 17.5, y: 3.5 },
+      { x: 10.5, y: 3.5 },
+      { x: 10.5, y: 0.5 },
+    ],
   ],
   portal: { col: 10, row: 0 },
   statues: [

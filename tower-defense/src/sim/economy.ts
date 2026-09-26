@@ -1,15 +1,16 @@
 // Gold, lives and scoring rules. All numbers come from src/data.
-import type { Difficulty, EnemyKind, Stars, TowerKind, TowerLevel } from '../core/types';
-import { DIFFICULTIES, ENEMIES, RULES, TOWERS } from '../data';
+// Stream A2 owns this file (v2: interest).
+import type { Difficulty, EnemyKind, Stars, TowerBranch, TowerKind, TowerLevel } from '../core/types';
+import { DIFFICULTIES, ENEMIES, nextUpgradeCost, RULES, TOWERS } from '../data';
 import type { SimState } from './state';
 
 export function buildCost(kind: TowerKind): number {
   return TOWERS[kind].levels[1].cost;
 }
 
-/** Cost of the next level, or null at max level. */
-export function upgradeCost(kind: TowerKind, level: TowerLevel): number | null {
-  return level < 3 ? TOWERS[kind].levels[(level + 1) as TowerLevel].cost : null;
+/** Cost of the next level (at L3: the chosen branch; defaults to 'a'), or null at max level. */
+export function upgradeCost(kind: TowerKind, level: TowerLevel, branch: TowerBranch | null = null): number | null {
+  return nextUpgradeCost(kind, level, branch);
 }
 
 export function sellValue(invested: number): number {
@@ -26,7 +27,7 @@ export function earlySendBonus(remaining: number | null): number {
   return Math.floor(remaining) * RULES.earlySendGoldPerSecond;
 }
 
-/** Enemy max HP for a wave (1-based) and difficulty. */
+/** Enemy max HP for a wave (1-based) and difficulty. TODO(A2): endless growth past the campaign. */
 export function enemyMaxHp(kind: EnemyKind, wave: number, difficulty: Difficulty): number {
   const w = Math.max(1, wave);
   return Math.round(ENEMIES[kind].hp * Math.pow(RULES.hpGrowthPerWave, w - 1) * DIFFICULTIES[difficulty].hpMultiplier);

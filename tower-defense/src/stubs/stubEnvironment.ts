@@ -12,6 +12,7 @@ const COLORS: Record<TileType, number> = {
   statue: 0x5a6878,
   tree: 0x2d4a36,
   rock: 0x6b6f73,
+  lava: 0xd0501a,
 };
 
 export function createStubEnvironment(): IEnvironment {
@@ -32,7 +33,7 @@ export function createStubEnvironment(): IEnvironment {
   }
 
   return {
-    init(h) {
+    init(h, _events) {
       host = h;
       const { camera, scene, layers } = h;
       camera.fov = 30;
@@ -76,9 +77,28 @@ export function createStubEnvironment(): IEnvironment {
       const t = tileAt(fromWorld(hit.x, hit.z));
       return inBounds(t) ? t : null;
     },
+    pickPoint(clientX, clientY) {
+      const rect = host.renderer.domElement.getBoundingClientRect();
+      const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+      raycaster.setFromCamera(ndc, host.camera);
+      const hit = new THREE.Vector3();
+      if (!raycaster.ray.intersectPlane(groundPlane, hit)) return null;
+      return fromWorld(hit.x, hit.z);
+    },
+    setMapPreview() {},
+    setTitleMode() {},
     setPlacementGhost(g: PlacementGhost | null) {
       ghostMesh.visible = ringMesh.visible = !!g;
       if (!g) return;
+      if (g.type !== 'tower') {
+        const center = g.point;
+        const w = toWorld(center, 0.02);
+        ghostMesh.position.set(w.x, w.y, w.z);
+        (ghostMesh.material as THREE.MeshBasicMaterial).color.set(g.valid ? 0x66ccff : 0xff3344);
+        ringMesh.position.set(w.x, 0.03, w.z);
+        ringMesh.scale.setScalar(g.type === 'ability' ? Math.max(0.3, g.radius) : 0.4);
+        return;
+      }
       const w = toWorld(tileCenter(g.tile), 0.02);
       ghostMesh.position.set(w.x, w.y, w.z);
       (ghostMesh.material as THREE.MeshBasicMaterial).color.set(g.valid ? 0x00ff66 : 0xff3344);

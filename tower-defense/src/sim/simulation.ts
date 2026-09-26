@@ -1,38 +1,48 @@
 // The simulation facade: GameCommands + step() + snapshot(), wiring all the systems together.
+// Stream A2 owns this file. The step() pipeline order below is part of the v2 A1/A2 contract.
 import { fail, OK, type CommandResult } from '../core/commands';
 import type { EventBus } from '../core/events';
-import { sameTile, tileCenter } from '../core/grid';
+import { sameTile, tileAt, tileCenter } from '../core/grid';
 import type { ISimulation } from '../core/interfaces';
 import type {
-  Difficulty,
+  AbilityId,
   EnemyKind,
   EntityId,
+  GameOptions,
   GameSnapshot,
   GameSpeed,
   TargetMode,
   TileCoord,
+  TowerBranch,
   TowerKind,
   TowerLevel,
+  Vec2,
 } from '../core/types';
-import { DEFAULT_MAP_ID, DIFFICULTIES, isBuildable, MAPS, pathLength, TOWERS } from '../data';
+import { DEFAULT_MAP_ID, DIFFICULTIES, isBuildable, isWalkable, MAPS, TOWERS } from '../data';
+import { cast, checkCast, updateAbilities } from './abilities';
 import { buildCost, sellValue, upgradeCost } from './economy';
 import { tickStatuses, updateGroundEffects } from './effects';
 import { canSendWave, checkDefeat, checkWaveCleared, startNextWave, updateBuildCountdown } from './flow';
+import { createHero, onEnemyKilledForHero, updateHeroCombat, updateHeroMovement } from './hero';
+import { applyStartModifiers } from './modifiers';
 import { moveEnemies } from './movement';
 import { updateProjectiles } from './projectiles';
 import { defaultRng, type Rng } from './rng';
 import { buildSnapshot, toTowerSnapshot } from './snapshot';
-import { spawnEnemy, updateSpawner } from './spawner';
+import { spawnEnemy } from './spawner';
+import { updateSpawner } from './spawner';
 import {
   allocId,
   createInitialState,
   findTower,
+  hasModifier,
   type EnemyState,
   type SimContext,
   type SimState,
   type TowerState,
 } from './state';
 import { updateTowers } from './towers';
+import { updateTraits } from './traits';
 
 export interface SimulationOptions {
   /** Random source (crits, freeze/stun chances). Defaults to Math.random. */
@@ -44,16 +54,25 @@ export interface SimulationHandle extends ISimulation {
   /** Live internal state (tests/debug only; mutate with care and call snapshot() afterwards). */
   readonly state: SimState;
   readonly ctx: SimContext;
-  /** Spawn an enemy directly at a distance along the path (tests/debug). */
-  debugSpawn(kind: EnemyKind, progress?: number): EnemyState;
+  /** Spawn an enemy directly at a distance along a lane (tests/debug). */
+  debugSpawn(kind: EnemyKind, progress?: number, lane?: number): EnemyState;
   /** Force the next snapshot() to rebuild (after mutating `state` directly). */
   invalidate(): void;
 }
 
 const TARGET_MODES: readonly TargetMode[] = ['first', 'last', 'strongest', 'closest'];
 
+export const DEFAULT_OPTIONS: GameOptions = { difficulty: 'normal', mapId: DEFAULT_MAP_ID, mode: 'campaign', modifiers: [] };
+
 export function createSimulationWithOptions(events: EventBus, options: SimulationOptions = {}): SimulationHandle {
-  const ctx: SimContext = { state: createInitialState(), events, rng: options.rng ?? defaultRng };
+  const ctx: SimContext = {
+    state: createInitialState(),
+    events,
+    rng: options.rng ?? defaultRng,
+    hooks: {
+      onEnemyKilled: (enemy, source) => onEnemyKilledForHero(ctx, enemy, source),
+    },
+  };
   let cached: GameSnapshot | null = null;
 
   const touch = (): void => {
@@ -77,6 +96,22 @@ export function createSimulationWithOptions(events: EventBus, options: Simulatio
     return OK;
   }
 
+  function checkRally(point: Vec2): CommandResult {
+    const { state } = ctx;
+    if (!inGame()) return fail('Not in a game');
+    if (!state.hero) return fail('No hero');
+    if (state.hero.state === 'down') return fail('Aldric is recovering');
+    if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return fail("Can't go there");
+    if (!isWalkable(state.map, tileAt(point))) return fail("Can't go there");
+    return OK;
+  }
+
+  /**
+   * One fixed step. Order (v2 contract between A1 and A2):
+   *  countdown/spawner -> abilities -> hero movement & blocking -> enemy movement/leaks -> defeat
+   *  -> statuses -> traits (heal, reveal) -> ground effects -> hero combat -> towers -> projectiles
+   *  -> prune dead -> wave clear.
+   */
   function step(dt: number): void {
     const { state } = ctx;
     if (!inGame() || !(dt > 0)) return;
@@ -86,10 +121,14 @@ export function createSimulationWithOptions(events: EventBus, options: Simulatio
     if (state.phase === 'build') updateBuildCountdown(ctx, dt);
     if (state.phase === 'wave') updateSpawner(ctx, dt);
 
+    updateAbilities(ctx, dt);
+    updateHeroMovement(ctx, dt);
     moveEnemies(ctx, dt);
     if (checkDefeat(ctx)) return;
     tickStatuses(ctx, dt);
+    updateTraits(ctx, dt);
     updateGroundEffects(ctx, dt);
+    updateHeroCombat(ctx, dt);
     updateTowers(ctx, dt);
     updateProjectiles(ctx, dt);
 
@@ -103,21 +142,24 @@ export function createSimulationWithOptions(events: EventBus, options: Simulatio
     },
     ctx,
 
-    startGame(difficulty: Difficulty, mapId: string = DEFAULT_MAP_ID) {
-      const map = MAPS[mapId] ?? MAPS[DEFAULT_MAP_ID]!;
-      const dd = DIFFICULTIES[difficulty] ?? DIFFICULTIES.normal;
-      const state = createInitialState();
-      state.map = map;
-      state.mapId = map.id;
-      state.pathLength = pathLength(map);
+    startGame(opts: GameOptions) {
+      const options: GameOptions = { ...DEFAULT_OPTIONS, ...opts };
+      const map = MAPS[options.mapId] ?? MAPS[DEFAULT_MAP_ID]!;
+      const dd = DIFFICULTIES[options.difficulty] ?? DIFFICULTIES.normal;
+      const state = createInitialState(map);
       state.difficulty = dd.id;
+      state.mode = options.mode === 'endless' ? 'endless' : 'campaign';
+      state.modifiers = [...new Set(options.modifiers ?? [])];
       state.gold = dd.startGold;
       state.lives = state.maxLives = dd.lives;
+      applyStartModifiers(state, options);
       state.phase = 'build';
       state.buildCountdown = null;
+      state.hero = createHero(state);
       ctx.state = state;
       touch();
-      events.emit('gameStarted', { difficulty: dd.id, mapId: map.id });
+      events.emit('gameStarted', { difficulty: dd.id, mapId: map.id, mode: state.mode, modifiers: [...state.modifiers] });
+      events.emit('heroSpawned', { pos: { ...state.hero.pos } });
     },
 
     returnToTitle() {
@@ -140,6 +182,7 @@ export function createSimulationWithOptions(events: EventBus, options: Simulatio
         id: allocId(state),
         kind,
         level: 1,
+        branch: null,
         tile: { col: tile.col, row: tile.row },
         pos: tileCenter(tile),
         targetMode: 'first',
@@ -156,15 +199,17 @@ export function createSimulationWithOptions(events: EventBus, options: Simulatio
       return OK;
     },
 
-    upgradeTower(id: EntityId) {
+    upgradeTower(id: EntityId, branch?: TowerBranch) {
       if (!inGame()) return reject('upgradeTower', 'Not in a game');
       const { state } = ctx;
       const t = findTower(state, id);
       if (!t) return reject('upgradeTower', 'Tower not found');
-      const cost = upgradeCost(t.kind, t.level);
+      if (t.level === 3 && branch !== 'a' && branch !== 'b') return reject('upgradeTower', 'Choose a specialization');
+      const cost = upgradeCost(t.kind, t.level, t.level === 3 ? branch! : null);
       if (cost === null) return reject('upgradeTower', 'Already at max level');
       if (state.gold < cost) return reject('upgradeTower', 'Not enough gold');
       state.gold -= cost;
+      if (t.level === 3) t.branch = branch!;
       t.level = (t.level + 1) as TowerLevel;
       t.invested += cost;
       touch();
@@ -175,6 +220,7 @@ export function createSimulationWithOptions(events: EventBus, options: Simulatio
     sellTower(id: EntityId) {
       if (!inGame()) return reject('sellTower', 'Not in a game');
       const { state } = ctx;
+      if (hasModifier(state, 'nosell')) return reject('sellTower', 'Selling is disabled (No Refunds)');
       const t = findTower(state, id);
       if (!t) return reject('sellTower', 'Tower not found');
       const refund = sellValue(t.invested);
@@ -203,6 +249,34 @@ export function createSimulationWithOptions(events: EventBus, options: Simulatio
       return OK;
     },
 
+    canSetHeroRally(point: Vec2) {
+      return checkRally(point);
+    },
+
+    setHeroRally(point: Vec2) {
+      const check = checkRally(point);
+      if (!check.ok) return reject('setHeroRally', check.reason);
+      const hero = ctx.state.hero!;
+      hero.rally = { x: point.x, y: point.y };
+      touch();
+      events.emit('heroMoved', { rally: { ...hero.rally } });
+      return OK;
+    },
+
+    canCastAbility(id: AbilityId, target?: Vec2) {
+      if (!inGame()) return fail('Not in a game');
+      return checkCast(ctx, id, target);
+    },
+
+    castAbility(id: AbilityId, target?: Vec2) {
+      if (!inGame()) return reject('castAbility', 'Not in a game');
+      const check = checkCast(ctx, id, target);
+      if (!check.ok) return reject('castAbility', check.reason);
+      cast(ctx, id, target);
+      touch();
+      return OK;
+    },
+
     setSpeed(speed: GameSpeed) {
       if (speed !== 1 && speed !== 2) return;
       ctx.state.speed = speed;
@@ -221,9 +295,9 @@ export function createSimulationWithOptions(events: EventBus, options: Simulatio
       return cached;
     },
 
-    debugSpawn(kind, progress = 0) {
+    debugSpawn(kind, progress = 0, lane = 0) {
       touch();
-      return spawnEnemy(ctx, kind, progress);
+      return spawnEnemy(ctx, kind, { progress, lane });
     },
 
     invalidate: touch,

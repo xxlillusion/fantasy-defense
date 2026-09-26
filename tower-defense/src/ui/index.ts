@@ -152,7 +152,7 @@ class OverlayUi implements IUi, Ui {
       ev.on('waveStarted', ({ wave, early, bonus }) => {
         const s = this.ctx.getSnapshot();
         const boss = this.lastNextWave?.some((g) => g.enemy === 'boss');
-        const sub = boss ? 'A colossal foe approaches!' : wave === s.totalWaves ? 'Final wave!' : `${s.totalWaves - wave} more to go`;
+        const sub = boss ? 'A colossal foe approaches!' : s.totalWaves === null ? 'Endless' : wave === s.totalWaves ? 'Final wave!' : `${s.totalWaves - wave} more to go`;
         this.toasts.banner(`Wave ${wave}`, sub, boss ? 'boss' : 'wave');
         if (early && bonus > 0) this.toast(`Early send +${bonus} gold`, 'gold');
       }),
@@ -160,7 +160,7 @@ class OverlayUi implements IUi, Ui {
     on.push(
       ev.on('waveCleared', ({ wave, bonus }) => {
         const s = this.ctx.getSnapshot();
-        if (wave >= s.totalWaves) return; // victory screen takes over
+        if (s.totalWaves !== null && wave >= s.totalWaves) return; // victory screen takes over
         this.toasts.banner('Wave cleared', `+${bonus} gold`, 'clear', 1800);
       }),
     );

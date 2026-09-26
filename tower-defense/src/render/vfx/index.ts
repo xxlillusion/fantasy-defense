@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import type { EventBus, GameEvents } from '../../core/events';
 import { toWorld } from '../../core/grid';
 import type { EntityId, GameSnapshot, Vec2 } from '../../core/types';
-import { FLYER_HEIGHT, getMap, TOWERS } from '../../data';
+import { FLYER_HEIGHT, getMap, towerStats } from '../../data';
 import { ENEMY_COLORS } from '../../art/sprites/enemies';
 import type { BillboardFrame } from '../entities/billboard';
 import { GroundLayer } from './ground';
@@ -92,9 +92,9 @@ export function createVfx(layer: THREE.Group, events: EventBus): Vfx {
         for (const t of e.targets) pts.push(w3(t.pos, enemyHeight(t.id)));
         lightning.spawn(pts);
         for (let i = 1; i < pts.length; i++) burst(glow, 5, pts[i]!, { colors: [0x60e8ff, 0xffffff], speed: 1.2, life: 0.2, size: 0.05 });
-      } else if (e.kind === 'frost' && TOWERS.frost.levels[e.level].aura) {
+      } else if (e.kind === 'frost' && towerStats('frost', e.level, e.branch).aura) {
         const at = w3(e.from, 0.04);
-        const range = TOWERS.frost.levels[e.level].range;
+        const range = towerStats('frost', e.level, e.branch).range;
         rings.spawn({ x: at.x, z: at.z, r0: 0.3, r1: range, color: 0x80e8ff, life: 0.5, opacity: 0.9 });
         for (let i = 0; i < 18; i++) {
           const a = (i / 18) * Math.PI * 2;
@@ -117,7 +117,7 @@ export function createVfx(layer: THREE.Group, events: EventBus): Vfx {
     },
     enemyLeaked() {
       if (!mapId) return;
-      const wps = getMap(mapId).waypoints;
+      const wps = getMap(mapId).paths[0]!;
       const portal = wps[wps.length - 1];
       if (!portal) return;
       const at = w3(portal, 0.05);

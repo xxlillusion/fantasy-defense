@@ -48,16 +48,16 @@ describe('save store', () => {
     const st = new FakeStorage();
     const a = createSaveStoreWithStorage(st);
     a.recordResult('m', 'hard', 3);
-    a.saveSettings({ audio: { master: 0.3, music: 0.1, sfx: 0.9, muted: true }, showDamageNumbers: false });
+    a.saveSettings({ audio: { master: 0.3, music: 0.1, sfx: 0.9, muted: true }, showDamageNumbers: false, screenShake: true, enemyIntros: true });
     expect(st.map.has(SAVE_KEY)).toBe(true);
     const b = createSaveStoreWithStorage(st);
     expect(b.getBestStars('m', 'hard')).toBe(3);
-    expect(b.getSettings()).toEqual({ audio: { master: 0.3, music: 0.1, sfx: 0.9, muted: true }, showDamageNumbers: false });
+    expect(b.getSettings()).toEqual({ audio: { master: 0.3, music: 0.1, sfx: 0.9, muted: true }, showDamageNumbers: false, screenShake: true, enemyIntros: true });
   });
 
   it('clamps volumes and fills missing fields', () => {
     const s = createSaveStoreWithStorage(new FakeStorage());
-    s.saveSettings({ audio: { master: 5, music: -1, sfx: Number.NaN, muted: false }, showDamageNumbers: true });
+    s.saveSettings({ audio: { master: 5, music: -1, sfx: Number.NaN, muted: false }, showDamageNumbers: true, screenShake: true, enemyIntros: true });
     const got = s.getSettings();
     expect(got.audio.master).toBe(1);
     expect(got.audio.music).toBe(0);
@@ -84,7 +84,7 @@ describe('save store', () => {
     const s = createSaveStoreWithStorage(new ThrowingStorage());
     expect(s.recordResult('m', 'normal', 1)).toBe(true);
     expect(s.getBestStars('m', 'normal')).toBe(1);
-    s.saveSettings({ ...DEFAULT_USER_SETTINGS, showDamageNumbers: false });
+    s.saveSettings({ ...DEFAULT_USER_SETTINGS, showDamageNumbers: false, screenShake: true, enemyIntros: true });
     expect(s.getSettings().showDamageNumbers).toBe(false);
   });
 

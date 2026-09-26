@@ -12,7 +12,7 @@
 import type * as THREE from 'three';
 import type { GameCommands } from './commands';
 import type { EventBus } from './events';
-import type { Difficulty, GameSnapshot, Stars, TileCoord, TowerKind, Vec2 } from './types';
+import type { AbilityId, Difficulty, EnemyKind, GameMode, GameSnapshot, Stars, TileCoord, TowerKind, Vec2 } from './types';
 
 // ---------------------------------------------------------------- Stream A
 
@@ -42,13 +42,18 @@ export interface RendererHost {
   };
 }
 
-export interface PlacementGhost {
-  kind: TowerKind;
-  tile: TileCoord;
-  valid: boolean;
-  /** Range in tiles, for the range ring. */
-  range: number;
-}
+/** What the cursor is currently previewing. */
+export type PlacementGhost =
+  | {
+      type: 'tower';
+      kind: TowerKind;
+      tile: TileCoord;
+      valid: boolean;
+      /** Range in tiles, for the range ring. */
+      range: number;
+    }
+  | { type: 'rally'; point: Vec2; valid: boolean }
+  | { type: 'ability'; id: AbilityId; point: Vec2; radius: number; valid: boolean };
 
 export interface Selection {
   tile: TileCoord;
@@ -57,7 +62,8 @@ export interface Selection {
 
 /** Stream B: static world, lighting, camera, post-processing, picking, overlays. */
 export interface IEnvironment {
-  init(host: RendererHost): void;
+  /** Events are for reactions (camera shake, portal flash/cracks, ability tints). */
+  init(host: RendererHost, events: EventBus): void;
   /** Per frame, before drawing. dtReal = real seconds since last frame (for ambient animation). */
   update(snapshot: GameSnapshot, dtReal: number): void;
   /** Draw the frame (owns the post-processing composer; must render host.scene with host.camera). */
@@ -65,8 +71,17 @@ export interface IEnvironment {
   resize(width: number, height: number): void;
   /** Screen (client) coordinates -> tile under the cursor on the ground plane, or null. */
   pickTile(clientX: number, clientY: number): TileCoord | null;
+  /** Screen -> continuous ground point in tile units (may be outside the grid), or null. */
+  pickPoint(clientX: number, clientY: number): Vec2 | null;
   setPlacementGhost(ghost: PlacementGhost | null): void;
   setSelection(selection: Selection | null): void;
+  /**
+   * Map to show while in the title phase (map-select preview). null = use snapshot.mapId.
+   * The environment rebuilds itself whenever the effective map changes.
+   */
+  setMapPreview(mapId: string | null): void;
+  /** Title phase: closer 'party lineup' camera pose; off = gameplay pose (blend ~1.2s). */
+  setTitleMode(on: boolean): void;
   dispose(): void;
 }
 
@@ -85,6 +100,9 @@ export type CreateEntities = () => IEntities;
 /** Facade the UI uses to talk to the renderer (implemented by the lead's Renderer). */
 export interface IRendererView {
   pickTile(clientX: number, clientY: number): TileCoord | null;
+  pickPoint(clientX: number, clientY: number): Vec2 | null;
+  setMapPreview(mapId: string | null): void;
+  setTitleMode(on: boolean): void;
   setPlacementGhost(ghost: PlacementGhost | null): void;
   setSelection(selection: Selection | null): void;
   /** Project a gameplay position (plus height in tiles) to client/CSS pixel coordinates. */
@@ -141,12 +159,33 @@ export type CreateAudio = () => IAudio;
 export interface UserSettings {
   audio: AudioSettings;
   showDamageNumbers: boolean;
+  screenShake: boolean;
+  /** Show the one-time 'new enemy' intro card (pauses the game). */
+  enemyIntros: boolean;
+}
+
+export interface BestRecord {
+  /** Campaign stars (0 in endless). */
+  stars: Stars;
+  score: number;
+  /** Highest wave reached. */
+  wave: number;
 }
 
 export interface ISaveStore {
   getBestStars(mapId: string, difficulty: Difficulty): Stars;
-  /** Records a result; keeps the best. Returns true if it was a new best. */
+  /** v1 API (campaign stars only). Prefer recordRun. */
   recordResult(mapId: string, difficulty: Difficulty, stars: Stars): boolean;
+  getBest(mapId: string, difficulty: Difficulty, mode: GameMode): BestRecord;
+  /** Keeps per-field bests. Returns which fields improved. */
+  recordRun(
+    mapId: string,
+    difficulty: Difficulty,
+    mode: GameMode,
+    run: BestRecord,
+  ): { stars: boolean; score: boolean; wave: boolean };
+  hasSeenEnemy(kind: EnemyKind): boolean;
+  markEnemySeen(kind: EnemyKind): void;
   getSettings(): UserSettings;
   saveSettings(settings: UserSettings): void;
 }

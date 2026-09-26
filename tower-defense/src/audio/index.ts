@@ -6,7 +6,7 @@ import { DEFAULT_AUDIO_SETTINGS } from '../core/defaults';
 import type { EventBus } from '../core/events';
 import type { AudioSettings, CreateAudio, IAudio, UiSound } from '../core/interfaces';
 import type { EnemyKind, TowerKind } from '../core/types';
-import { TOWERS } from '../data';
+import { towerStats } from '../data';
 import { createMusicJob, type MusicJob } from './music';
 import { PLAY_RULES, SFX_DEFS, SFX_IDS, type SfxId } from './sfxBank';
 import { renderSound } from './synth';
@@ -33,7 +33,19 @@ const UI_SFX: Record<UiSound, SfxId> = {
 };
 
 /** Pitch offset for kill pops by enemy size. */
-const KILL_RATE: Record<EnemyKind, number> = { grunt: 1, runner: 1.1, brute: 0.75, swarmling: 1.35, flyer: 1.2, boss: 0.6 };
+const KILL_RATE: Record<EnemyKind, number> = {
+  grunt: 1,
+  runner: 1.1,
+  brute: 0.75,
+  swarmling: 1.35,
+  flyer: 1.2,
+  boss: 0.6,
+  shaman: 1.05,
+  shieldbearer: 0.85,
+  broodmother: 0.8,
+  wraith: 1.25,
+  dragon: 0.55,
+};
 
 type MusicMode = 'calm' | 'battle' | 'silent';
 /** Stem levels per mode (multiplied by the music volume). */
@@ -77,8 +89,8 @@ class AudioEngine implements IAudio {
     this.settings = this.sanitize(settings);
     this.unsubs.forEach((u) => u());
     this.unsubs = [
-      events.on('towerFired', ({ kind, level }) => {
-        const aura = kind === 'frost' && TOWERS.frost.levels[level].aura;
+      events.on('towerFired', ({ kind, level, branch }) => {
+        const aura = kind === 'frost' && towerStats('frost', level, branch).aura;
         this.play(aura ? 'fire_frost_aura' : FIRE_SFX[kind], { rate: 1 - (level - 1) * 0.03 });
       }),
       events.on('projectileHit', ({ kind, splashRadius }) => this.play(splashRadius > 0 || kind === 'shockwave' ? 'hit_boom' : 'hit')),

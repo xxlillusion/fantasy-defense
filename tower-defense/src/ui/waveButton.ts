@@ -38,7 +38,7 @@ export class WaveButton {
   update(s: GameSnapshot): void {
     const build = s.phase === 'build';
     const nextNo = s.wave + 1;
-    const hasNext = s.nextWave !== null && s.wave < s.totalWaves;
+    const hasNext = s.nextWave !== null && (s.totalWaves === null || s.wave < s.totalWaves);
     setDisabled(this.btn, !build || !hasNext);
     cls(this.el, 'is-wave', s.phase === 'wave');
 

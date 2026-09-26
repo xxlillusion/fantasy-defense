@@ -34,7 +34,7 @@ describe('armor and damage math', () => {
     const { sim, log } = makeSim();
     const e = sim.debugSpawn('grunt', 3);
     const gold = sim.state.gold;
-    damageEnemy(sim.ctx, e, 1000, { armorPierce: false, crit: false });
+    damageEnemy(sim.ctx, e, 1000, { armorPierce: false, crit: false, source: { type: 'burn' } });
     expect(log.of('enemyKilled')).toEqual([{ enemyId: e.id, kind: 'grunt', pos: e.pos, bounty: 5 }]);
     expect(sim.state.gold).toBe(gold + 5);
     expect(sim.state.stats.kills).toBe(1);
@@ -118,7 +118,7 @@ describe('splash', () => {
     const b = heldEnemy(sim, 'grunt', 4.8);
     sim.step(1 / 60);
     expect(sim.state.projectiles).toHaveLength(1);
-    damageEnemy(sim.ctx, a, 1e6, { armorPierce: true, crit: false });
+    damageEnemy(sim.ctx, a, 1e6, { armorPierce: true, crit: false, source: { type: 'burn' } });
     steps(sim, seconds(1));
     expect(log.of('projectileHit')).toHaveLength(1);
     expect(log.of('projectileHit')[0]!.pos.x).toBeCloseTo(3.5);
@@ -131,7 +131,7 @@ describe('splash', () => {
     const a = heldEnemy(sim, 'grunt', 4);
     sim.step(1 / 60);
     expect(sim.state.projectiles).toHaveLength(1);
-    damageEnemy(sim.ctx, a, 1e6, { armorPierce: true, crit: false });
+    damageEnemy(sim.ctx, a, 1e6, { armorPierce: true, crit: false, source: { type: 'burn' } });
     steps(sim, 3);
     expect(sim.state.projectiles).toHaveLength(0);
     expect(log.of('projectileHit')).toHaveLength(0);

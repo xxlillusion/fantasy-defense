@@ -1,5 +1,8 @@
 import { GRID_COLS, GRID_ROWS, inBounds } from '../../core/grid';
 import type { TileCoord, Vec2 } from '../../core/types';
+import { WAVES, type WaveDef } from '../waves';
+import { EMBER_FORGE } from './emberForge';
+import { MOONLIT_RUINS } from './moonlitRuins';
 import type { MapDef, TileType } from './types';
 import { WATERFALL_SHRINE } from './waterfallShrine';
 
@@ -7,7 +10,12 @@ export type { MapDef, TileType } from './types';
 
 export const MAPS: Record<string, MapDef> = {
   [WATERFALL_SHRINE.id]: WATERFALL_SHRINE,
+  [EMBER_FORGE.id]: EMBER_FORGE,
+  [MOONLIT_RUINS.id]: MOONLIT_RUINS,
 };
+
+/** Map-select order. */
+export const MAP_IDS: readonly string[] = [WATERFALL_SHRINE.id, EMBER_FORGE.id, MOONLIT_RUINS.id];
 
 export const DEFAULT_MAP_ID = WATERFALL_SHRINE.id;
 
@@ -17,6 +25,11 @@ export function getMap(id: string = DEFAULT_MAP_ID): MapDef {
   return map;
 }
 
+/** The campaign wave list for a map. */
+export function mapWaves(map: MapDef): readonly WaveDef[] {
+  return map.waves ?? WAVES;
+}
+
 const CHAR_TO_TILE: Record<string, TileType> = {
   '.': 'grass',
   '#': 'path',
@@ -24,6 +37,7 @@ const CHAR_TO_TILE: Record<string, TileType> = {
   S: 'statue',
   T: 'tree',
   R: 'rock',
+  L: 'lava',
 };
 
 export function tileType(map: MapDef, t: TileCoord): TileType | null {
@@ -36,20 +50,27 @@ export function isBuildable(map: MapDef, t: TileCoord): boolean {
   return tileType(map, t) === 'grass';
 }
 
-/** Total path length in tiles. */
-export function pathLength(map: MapDef): number {
+/** Tiles the hero may stand on / rally to. */
+export function isWalkable(map: MapDef, t: TileCoord): boolean {
+  const type = tileType(map, t);
+  return type === 'grass' || type === 'path';
+}
+
+/** Path length in tiles of one lane. */
+export function pathLength(map: MapDef, lane = 0): number {
+  const wp = map.paths[lane] ?? map.paths[0]!;
   let len = 0;
-  for (let i = 1; i < map.waypoints.length; i++) {
-    const a = map.waypoints[i - 1]!;
-    const b = map.waypoints[i]!;
+  for (let i = 1; i < wp.length; i++) {
+    const a = wp[i - 1]!;
+    const b = wp[i]!;
     len += Math.hypot(b.x - a.x, b.y - a.y);
   }
   return len;
 }
 
-/** Position and heading at a distance along the path (clamped to the ends). */
-export function pointAlongPath(map: MapDef, distance: number): { pos: Vec2; heading: number } {
-  const wp = map.waypoints;
+/** Position and heading at a distance along a lane (clamped to the ends). */
+export function pointAlongPath(map: MapDef, distance: number, lane = 0): { pos: Vec2; heading: number } {
+  const wp = map.paths[lane] ?? map.paths[0]!;
   let remaining = Math.max(0, distance);
   for (let i = 1; i < wp.length; i++) {
     const a = wp[i - 1]!;
@@ -65,18 +86,38 @@ export function pointAlongPath(map: MapDef, distance: number): { pos: Vec2; head
   return { pos: { ...wp[0]! }, heading: 0 };
 }
 
-/** Sanity check used by tests: layout dimensions and waypoint tiles are path/portal. */
+/** Sanity check used by tests: layout dimensions, every lane on path tiles and ending at the portal. */
 export function validateMap(map: MapDef): string[] {
   const errors: string[] = [];
   if (map.layout.length !== GRID_ROWS) errors.push(`expected ${GRID_ROWS} rows, got ${map.layout.length}`);
   map.layout.forEach((row, r) => {
     if (row.length !== GRID_COLS) errors.push(`row ${r}: expected ${GRID_COLS} cols, got ${row.length}`);
+    for (const ch of row) if (!CHAR_TO_TILE[ch]) errors.push(`row ${r}: unknown tile char "${ch}"`);
   });
-  for (const p of map.waypoints) {
-    const t = { col: Math.floor(p.x), row: Math.floor(p.y) };
-    if (!inBounds(t)) continue; // spawn may be off-map
-    const type = tileType(map, t);
-    if (type !== 'path' && type !== 'portal') errors.push(`waypoint (${p.x},${p.y}) is on ${type}`);
-  }
+  if (!map.paths.length) errors.push('no paths');
+  map.paths.forEach((wp, lane) => {
+    // every tile crossed by each segment must be path/portal (spawn may start off-map)
+    for (let i = 1; i < wp.length; i++) {
+      const a = wp[i - 1]!;
+      const b = wp[i]!;
+      const steps = Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) * 4);
+      for (let k = 0; k <= steps; k++) {
+        const x = a.x + ((b.x - a.x) * k) / steps;
+        const y = a.y + ((b.y - a.y) * k) / steps;
+        const t = { col: Math.floor(x), row: Math.floor(y) };
+        if (!inBounds(t)) continue;
+        const type = tileType(map, t);
+        if (type !== 'path' && type !== 'portal') {
+          errors.push(`lane ${lane}: segment ${i} crosses ${type} at (${t.col},${t.row})`);
+          break;
+        }
+      }
+    }
+    const end = wp[wp.length - 1]!;
+    if (Math.floor(end.x) !== map.portal.col || Math.floor(end.y) !== map.portal.row) {
+      errors.push(`lane ${lane}: does not end at the portal`);
+    }
+  });
+  if (mapWaves(map).length < 1) errors.push('no waves');
   return errors;
 }

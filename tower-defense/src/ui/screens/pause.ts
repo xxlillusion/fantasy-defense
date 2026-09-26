@@ -57,7 +57,7 @@ export class PauseScreen {
     const s = this.ui.snap();
     this.ui.sfx(what === 'restart' ? 'click' : 'close');
     this.ui.closeOverlay();
-    if (what === 'restart') this.ui.ctx.commands.startGame(s.difficulty, s.mapId);
+    if (what === 'restart') this.ui.ctx.commands.startGame({ difficulty: s.difficulty, mapId: s.mapId, mode: s.mode, modifiers: s.modifiers });
     else this.ui.ctx.commands.returnToTitle();
   }
 }

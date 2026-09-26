@@ -16,6 +16,11 @@ const STEP_RATE: Record<EnemyKind, number> = {
   swarmling: 5,
   flyer: 0,
   boss: 1.6,
+  shaman: 3.0,
+  shieldbearer: 2.6,
+  broodmother: 2.4,
+  wraith: 2.2,
+  dragon: 0,
 };
 
 const FLASH_TIME = 0.12;

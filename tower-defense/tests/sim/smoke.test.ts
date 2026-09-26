@@ -54,7 +54,7 @@ describe('headless smoke tests', () => {
     const { sim, log } = makeSim();
     playOut(sim);
     expect(sim.snapshot().phase).toBe('defeat');
-    expect(log.of('gameOver')).toEqual([{ result: 'defeat', stars: 0 }]);
+    expect(log.of('gameOver')).toMatchObject([{ result: 'defeat', stars: 0 }]);
     expect(log.of('enemyKilled')).toHaveLength(0);
   });
 

@@ -13,6 +13,12 @@ export const ENEMY_FRAME_SIZE: Record<EnemyKind, { w: number; h: number }> = {
   swarmling: { w: 18, h: 18 },
   flyer: { w: 32, h: 26 },
   boss: { w: 50, h: 50 },
+  // v2 placeholders (Stream C replaces): reuse existing art until the new sprites exist.
+  shaman: { w: 24, h: 26 },
+  shieldbearer: { w: 34, h: 36 },
+  broodmother: { w: 34, h: 36 },
+  wraith: { w: 34, h: 30 },
+  dragon: { w: 32, h: 26 },
 };
 
 /** Dominant colors, used for death puffs. */
@@ -23,6 +29,11 @@ export const ENEMY_COLORS: Record<EnemyKind, readonly number[]> = {
   swarmling: [C.imp, 0x8a2a8a, C.gold],
   flyer: [C.wyvern, C.belly, 0xd070ff],
   boss: [C.golem, C.rune, C.moss],
+  shaman: [C.goblin, C.leather, C.capRed],
+  shieldbearer: [C.troll, C.armor, C.trim],
+  broodmother: [C.troll, C.armor, C.trim],
+  wraith: [C.wolf, C.goblin, C.capRed],
+  dragon: [C.wyvern, C.belly, 0xd070ff],
 };
 
 type Frame = 0 | 1;
@@ -307,6 +318,11 @@ const DRAW: Record<EnemyKind, (f: Frame) => PixelCanvas> = {
   swarmling: imp,
   flyer: wyvern,
   boss: golem,
+  shaman: goblin,
+  shieldbearer: troll,
+  broodmother: troll,
+  wraith: wolfRider,
+  dragon: wyvern,
 };
 
 const cache = new Map<EnemyKind, SpriteSheet>();

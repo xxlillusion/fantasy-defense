@@ -59,7 +59,7 @@ export class GameOverScreen {
   retry(): void {
     const s = this.ui.snap();
     this.ui.sfx('click');
-    this.ui.ctx.commands.startGame(s.difficulty, s.mapId);
+    this.ui.ctx.commands.startGame({ difficulty: s.difficulty, mapId: s.mapId, mode: s.mode, modifiers: s.modifiers });
   }
 
   toTitle(): void {

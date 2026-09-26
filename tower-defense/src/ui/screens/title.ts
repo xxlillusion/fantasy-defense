@@ -100,7 +100,7 @@ export class TitleScreen {
         card.addEventListener('click', (e) => {
           e.stopPropagation();
           this.ui.sfx('click');
-          this.ui.ctx.commands.startGame(d, mapId);
+          this.ui.ctx.commands.startGame({ difficulty: d, mapId, mode: 'campaign', modifiers: [] }); // TODO(D): map/mode/modifier select
         });
         return card;
       }),

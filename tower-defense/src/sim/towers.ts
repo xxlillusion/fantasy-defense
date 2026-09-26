@@ -1,19 +1,19 @@
 // Tower cooldowns, target acquisition and firing (projectiles, chain lightning, aura pulses).
-import { TOWER_PROJECTILE, TOWERS, type TowerLevelStats } from '../data';
+import { TOWER_PROJECTILE, TOWERS, towerStats as resolveStats, type TowerLevelStats } from '../data';
 import { chainDamage, damageEnemy } from './damage';
 import { applyOnHitEffects } from './effects';
 import { bestByMode, buildChain, enemiesInRange, sortByMode } from './targeting';
 import { allocId, type EnemyState, type SimContext, type TowerState } from './state';
 
 export function towerStats(t: TowerState): TowerLevelStats {
-  return TOWERS[t.kind].levels[t.level];
+  return resolveStats(t.kind, t.level, t.branch);
 }
 
 export function updateTowers(ctx: SimContext, dt: number): void {
   const { state } = ctx;
   for (const tower of state.towers) {
     const def = TOWERS[tower.kind];
-    const lvl = def.levels[tower.level];
+    const lvl = towerStats(tower);
     tower.cooldown -= dt;
 
     const inRange = enemiesInRange(state.enemies, def, tower.pos, lvl.range);
@@ -42,6 +42,7 @@ function emitFired(ctx: SimContext, tower: TowerState, targets: EnemyState[]): v
     towerId: tower.id,
     kind: tower.kind,
     level: tower.level,
+    branch: tower.branch,
     from: { ...tower.pos },
     targets: targetList(targets),
   });
@@ -61,7 +62,7 @@ function fire(ctx: SimContext, tower: TowerState, lvl: TowerLevelStats, candidat
     emitFired(ctx, tower, candidates);
     for (const e of candidates) {
       const { damage, crit } = rollCrit(ctx, lvl);
-      damageEnemy(ctx, e, damage, { armorPierce: lvl.armorPierce, crit });
+      damageEnemy(ctx, e, damage, { armorPierce: lvl.armorPierce, crit, source: { type: 'tower', towerId: tower.id } });
       applyOnHitEffects(ctx, e, lvl);
     }
     return;
@@ -72,7 +73,7 @@ function fire(ctx: SimContext, tower: TowerState, lvl: TowerLevelStats, candidat
     emitFired(ctx, tower, chain);
     chain.forEach((e, i) => {
       const { damage, crit } = rollCrit(ctx, lvl);
-      damageEnemy(ctx, e, chainDamage(damage, lvl.chain!.falloff, i), { armorPierce: lvl.armorPierce, crit });
+      damageEnemy(ctx, e, chainDamage(damage, lvl.chain!.falloff, i), { armorPierce: lvl.armorPierce, crit, source: { type: 'tower', towerId: tower.id } });
       applyOnHitEffects(ctx, e, lvl);
     });
     return;
@@ -89,7 +90,7 @@ function fire(ctx: SimContext, tower: TowerState, lvl: TowerLevelStats, candidat
     const { damage, crit } = rollCrit(ctx, lvl);
     if (projKind === null || lvl.projectileSpeed <= 0) {
       // Instant hit (no projectile visual defined for this tower).
-      damageEnemy(ctx, target, damage, { armorPierce: lvl.armorPierce, crit });
+      damageEnemy(ctx, target, damage, { armorPierce: lvl.armorPierce, crit, source: { type: 'tower', towerId: tower.id } });
       applyOnHitEffects(ctx, target, lvl);
       continue;
     }
@@ -111,6 +112,10 @@ function fire(ctx: SimContext, tower: TowerState, lvl: TowerLevelStats, candidat
       slow: lvl.slow,
       stun: lvl.stun,
       burn: lvl.burn,
+      vulnerable: lvl.vulnerable,
+      execute: lvl.execute,
+      pierce: lvl.pierce,
+      pierced: [],
     });
   }
 }

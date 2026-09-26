@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { SIM_DT } from '../../src/core/grid';
 import type { GamePhase } from '../../src/core/types';
-import { DIFFICULTIES, RULES, WAVES } from '../../src/data';
+import { DEFAULT_MAP_ID, DIFFICULTIES, RULES, WAVES } from '../../src/data';
 import { damageEnemy } from '../../src/sim/damage';
 import { waveClearBonus } from '../../src/sim/economy';
 import type { SimulationHandle } from '../../src/sim';
@@ -40,7 +40,7 @@ describe('phases and waves', () => {
     sim.sendWave();
     runUntil(sim, () => log.of('waveCleared').length > 0);
     expect(log.of('enemyLeaked')).toHaveLength(WAVES[0]![0]!.count);
-    expect(log.of('waveCleared')).toEqual([{ wave: 1, bonus: waveClearBonus(1) }]);
+    expect(log.of('waveCleared')).toMatchObject([{ wave: 1, bonus: waveClearBonus(1) }]);
     expect(waveClearBonus(1)).toBe(RULES.waveClearBonusBase + RULES.waveClearBonusPerWave);
     expect(sim.snapshot()).toMatchObject({ phase: 'build', wave: 1, buildCountdown: RULES.buildCountdown });
     expect(sim.snapshot().gold).toBe(DIFFICULTIES.easy.startGold + waveClearBonus(1));
@@ -75,7 +75,7 @@ describe('phases and waves', () => {
     sim.sendWave();
     runUntil(sim, () => phase(sim) === 'defeat');
     expect(sim.snapshot()).toMatchObject({ phase: 'defeat', lives: 0, stars: 0 });
-    expect(log.of('gameOver')).toEqual([{ result: 'defeat', stars: 0 }]);
+    expect(log.of('gameOver')).toMatchObject([{ result: 'defeat', stars: 0, mode: 'campaign' }]);
     const t = sim.snapshot().time;
     const n = log.all.length;
     steps(sim, 100);
@@ -87,7 +87,7 @@ describe('phases and waves', () => {
 
   it('boss leak costs its livesCost', () => {
     const { sim, log } = makeSim();
-    sim.debugSpawn('boss', sim.state.pathLength - 0.001);
+    sim.debugSpawn('boss', sim.state.pathLengths[0]! - 0.001);
     sim.step(SIM_DT);
     expect(log.of('enemyLeaked')[0]).toMatchObject({ kind: 'boss', livesLost: 5 });
     expect(sim.snapshot().lives).toBe(15);
@@ -101,7 +101,7 @@ describe('phases and waves', () => {
     if (livesLeft !== undefined) sim.state.lives = livesLeft;
     sim.sendWave();
     runUntil(sim, () => {
-      for (const e of sim.state.enemies) damageEnemy(sim.ctx, e, 1e9, { armorPierce: true, crit: false });
+      for (const e of sim.state.enemies) damageEnemy(sim.ctx, e, 1e9, { armorPierce: true, crit: false, source: { type: 'burn' } });
       return phase(sim) !== 'wave';
     });
     return h;
@@ -109,9 +109,9 @@ describe('phases and waves', () => {
 
   it('clearing the final wave is a victory with stars', () => {
     const { sim, log } = clearFinalWave();
-    expect(log.of('waveCleared').at(-1)).toEqual({ wave: WAVES.length, bonus: waveClearBonus(WAVES.length) });
+    expect(log.of('waveCleared').at(-1)).toMatchObject({ wave: WAVES.length, bonus: waveClearBonus(WAVES.length) });
     expect(sim.snapshot()).toMatchObject({ phase: 'victory', stars: 3, nextWave: null, buildCountdown: null });
-    expect(log.of('gameOver')).toEqual([{ result: 'victory', stars: 3 }]);
+    expect(log.of('gameOver')).toMatchObject([{ result: 'victory', stars: 3 }]);
     steps(sim, 10);
     expect(log.of('gameOver')).toHaveLength(1);
 
@@ -128,8 +128,8 @@ describe('game lifecycle, pause, speed, snapshot', () => {
     steps(sim, seconds(3));
     sim.setSpeed(2);
     sim.setPaused(true);
-    sim.startGame('hard');
-    expect(log.of('gameStarted').at(-1)).toEqual({ difficulty: 'hard', mapId: 'waterfall-shrine' });
+    sim.startGame({ difficulty: 'hard', mapId: DEFAULT_MAP_ID, mode: 'campaign', modifiers: [] });
+    expect(log.of('gameStarted').at(-1)).toEqual({ difficulty: 'hard', mapId: 'waterfall-shrine', mode: 'campaign', modifiers: [] });
     const s = sim.snapshot();
     expect(s).toMatchObject({ phase: 'build', wave: 0, time: 0, gold: DIFFICULTIES.hard.startGold, lives: DIFFICULTIES.hard.lives, speed: 1, paused: false, difficulty: 'hard' });
     expect(s.towers).toHaveLength(0);
@@ -175,12 +175,12 @@ describe('game lifecycle, pause, speed, snapshot', () => {
     sim.step(SIM_DT);
     const s = sim.snapshot();
     expect(Object.keys(s.enemies[0]!).sort()).toEqual(
-      ['id', 'kind', 'pos', 'hp', 'maxHp', 'armor', 'flying', 'slow', 'stunned', 'burning', 'progress', 'heading'].sort(),
+      ['id', 'kind', 'pos', 'hp', 'maxHp', 'armor', 'flying', 'slow', 'stunned', 'burning', 'progress', 'heading', 'lane', 'remaining', 'shield', 'stealthed', 'revealed', 'vulnerable', 'blockedByHero'].sort(),
     );
     expect(Object.keys(s.projectiles[0]!).sort()).toEqual(['id', 'kind', 'sourceTowerId', 'pos', 'from', 'to', 'targetId', 'targetFlying'].sort());
     expect(s.projectiles[0]!.kind).toBe('arrow');
     expect(Object.keys(s.towers[0]!).sort()).toEqual(
-      ['id', 'kind', 'level', 'tile', 'pos', 'targetMode', 'targetId', 'facing', 'lastFiredAt', 'invested', 'sellValue', 'upgradeCost', 'range'].sort(),
+      ['id', 'kind', 'level', 'tile', 'pos', 'targetMode', 'targetId', 'facing', 'lastFiredAt', 'invested', 'sellValue', 'upgradeCost', 'range', 'branch', 'cooldownFraction', 'branchOptions'].sort(),
     );
   });
 });

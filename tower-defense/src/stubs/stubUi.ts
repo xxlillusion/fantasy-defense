@@ -1,7 +1,7 @@
 // Lead-owned STUB. Bare-bones debug UI so the game is playable. Stream D replaces with src/ui/.
 import type { IUi, UiContext } from '../core/interfaces';
 import type { EntityId, GameSnapshot, TowerKind } from '../core/types';
-import { TOWER_KINDS, TOWERS } from '../data';
+import { DEFAULT_MAP_ID, TOWER_KINDS, TOWERS } from '../data';
 
 export function createStubUi(): IUi {
   let ctx: UiContext;
@@ -31,7 +31,7 @@ export function createStubUi(): IUi {
       hud.style.cssText = 'position:absolute;left:8px;top:8px;background:#000a;color:#fff;padding:6px;font:12px monospace;white-space:pre';
       c.root.append(panel, hud);
 
-      for (const d of ['easy', 'normal', 'hard'] as const) panel.append(btn(`Start ${d}`, () => c.commands.startGame(d)));
+      for (const d of ['easy', 'normal', 'hard'] as const) panel.append(btn(`Start ${d}`, () => c.commands.startGame({ difficulty: d, mapId: DEFAULT_MAP_ID, mode: 'campaign', modifiers: [] })));
       panel.append(document.createElement('br'));
       for (const k of TOWER_KINDS) panel.append(btn(`${TOWERS[k].hotkey}:${TOWERS[k].name} ${TOWERS[k].levels[1].cost}g`, () => (placing = k)));
       panel.append(document.createElement('br'));
@@ -49,7 +49,7 @@ export function createStubUi(): IUi {
         if (!placing) return c.view.setPlacementGhost(null);
         const tile = c.view.pickTile(e.clientX, e.clientY);
         if (!tile) return c.view.setPlacementGhost(null);
-        c.view.setPlacementGhost({ kind: placing, tile, valid: c.commands.canPlaceTower(placing, tile).ok, range: TOWERS[placing].levels[1].range });
+        c.view.setPlacementGhost({ type: 'tower', kind: placing, tile, valid: c.commands.canPlaceTower(placing, tile).ok, range: TOWERS[placing].levels[1].range });
       });
       canvas.addEventListener('click', (e) => {
         c.audio.unlock();

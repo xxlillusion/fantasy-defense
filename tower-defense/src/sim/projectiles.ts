@@ -42,8 +42,8 @@ function impact(ctx: SimContext, p: ProjectileState, target: EnemyState | null):
   else victims = target ? [target] : [];
 
   for (const e of victims) {
-    damageEnemy(ctx, e, p.damage, { armorPierce: p.armorPierce, crit: p.crit });
+    damageEnemy(ctx, e, p.damage, { armorPierce: p.armorPierce, crit: p.crit, source: { type: 'tower', towerId: p.sourceTowerId } });
     applyOnHitEffects(ctx, e, p);
   }
-  if (p.burn) spawnBurn(ctx, p.pos, p.burn);
+  if (p.burn) spawnBurn(ctx, p.pos, p.burn, { type: 'tower', towerId: p.sourceTowerId });
 }

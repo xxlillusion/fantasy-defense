@@ -49,7 +49,8 @@ export function buildGround(map: MapDef, anisotropy: number): THREE.Group {
   group.add(outer);
 
   // Inner painted playfield
-  const typeAt = (t: TileCoord) => tileType(map, t);
+  // TODO(B): paint lava properly; rock is a stand-in so the painter's tile union stays valid.
+  const typeAt = (t: TileCoord) => { const ty = tileType(map, t); return ty === 'lava' ? 'rock' : ty; };
   const extraPath: { tile: TileCoord; alpha: number }[] = [];
   // spawn trail: extend path tiles on the grid border outward, fading
   for (let row = 0; row < GRID_ROWS; row++) {
