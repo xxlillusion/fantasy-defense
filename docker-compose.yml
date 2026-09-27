@@ -1,0 +1,30 @@
+# VPS deployment — serves the game at tower.maybesomething.tech beside the
+# existing n8n stack, whose Traefik terminates TLS (cert resolver
+# `mytlschallenge`, network `n8n_default`).
+#
+# The image builds straight from GitHub, so deploying an update is: push to
+# main, then "Update" the `fantasy-defense` Docker project in hPanel (or
+# `docker compose up -d --build` on the VPS).
+
+services:
+  tower:
+    build:
+      context: https://github.com/xxlillusion/fantasy-defense.git#main:tower-defense
+    image: fantasy-defense:latest
+    pull_policy: build
+    restart: always
+    networks:
+      - traefik
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=n8n_default
+      - traefik.http.routers.tower.rule=Host(`tower.maybesomething.tech`)
+      - traefik.http.routers.tower.entrypoints=websecure
+      - traefik.http.routers.tower.tls=true
+      - traefik.http.routers.tower.tls.certresolver=mytlschallenge
+      - traefik.http.services.tower.loadbalancer.server.port=80
+
+networks:
+  traefik:
+    name: n8n_default
+    external: true
